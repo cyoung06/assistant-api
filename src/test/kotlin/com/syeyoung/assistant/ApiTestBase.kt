@@ -1,8 +1,8 @@
 package com.syeyoung.assistant
 
 import com.syeyoung.assistant.quickadd.ItemExtractor
-import io.zonky.test.db.postgres.embedded.EmbeddedPostgres
 import com.syeyoung.assistant.quickadd.LlmDraft
+import io.zonky.test.db.postgres.embedded.EmbeddedPostgres
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
@@ -35,9 +35,16 @@ class FakeExtractor : ItemExtractor {
     }
 }
 
-/** One Postgres process for the whole test run. */
+/**
+ * The test database: `TEST_DB_HOST`/`TEST_DB_PORT` when set (CI provides a Postgres service there,
+ * since Postgres refuses to run as root inside CI containers), otherwise one embedded Postgres
+ * process for the whole run. Either way user, password and database are `postgres`.
+ */
 object TestDatabase {
-    val postgres: EmbeddedPostgres by lazy { EmbeddedPostgres.builder().start() }
+    private val embedded by lazy { EmbeddedPostgres.builder().start() }
+
+    val host: String = System.getenv("TEST_DB_HOST") ?: "localhost"
+    val port: Int by lazy { System.getenv("TEST_DB_PORT")?.toInt() ?: if (System.getenv("TEST_DB_HOST") != null) 5432 else embedded.port }
 }
 
 @TestConfiguration(proxyBeanMethods = false)
@@ -65,11 +72,12 @@ abstract class ApiTestBase {
         @JvmStatic
         @DynamicPropertySource
         fun database(registry: DynamicPropertyRegistry) {
-            val port = TestDatabase.postgres.port
-            registry.add("spring.r2dbc.url") { "r2dbc:postgresql://localhost:$port/postgres" }
+            val host = TestDatabase.host
+            val port = TestDatabase.port
+            registry.add("spring.r2dbc.url") { "r2dbc:postgresql://$host:$port/postgres" }
             registry.add("spring.r2dbc.username") { "postgres" }
             registry.add("spring.r2dbc.password") { "postgres" }
-            registry.add("spring.flyway.url") { "jdbc:postgresql://localhost:$port/postgres" }
+            registry.add("spring.flyway.url") { "jdbc:postgresql://$host:$port/postgres" }
             registry.add("spring.flyway.user") { "postgres" }
             registry.add("spring.flyway.password") { "postgres" }
         }
