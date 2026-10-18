@@ -7,6 +7,8 @@ import java.time.ZoneId
 @ConfigurationProperties("app")
 data class AppProperties(
     val zone: ZoneId = ZoneId.of("Asia/Seoul"),
+    /** Where the web app is reached; links to the app's own things (tasks, events, mail) start with it. */
+    val publicUrl: String = "http://localhost:5173",
     val sources: Sources = Sources(),
     val dav: Dav = Dav(),
 ) {
@@ -60,6 +62,8 @@ data class AppProperties(
             val lookback: Duration = Duration.ofDays(14),
             /** How far ahead deadlines are fetched: the whole semester. */
             val lookahead: Duration = Duration.ofDays(200),
+            /** How often course files and board posts are listed for references. */
+            val catalogInterval: Duration = Duration.ofHours(6),
         )
     }
 }

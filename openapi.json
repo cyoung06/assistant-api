@@ -406,6 +406,37 @@
         "required" : [ "configured", "state" ],
         "type" : "object"
       },
+      "MailMessage" : {
+        "properties" : {
+          "from" : {
+            "type" : "string"
+          },
+          "html" : {
+            "type" : [ "string", "null" ]
+          },
+          "messageId" : {
+            "type" : "string"
+          },
+          "received" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "subject" : {
+            "type" : "string"
+          },
+          "text" : {
+            "type" : [ "string", "null" ]
+          },
+          "to" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "from", "messageId", "subject", "to" ],
+        "type" : "object"
+      },
       "MoveReport" : {
         "properties" : {
           "labels" : {
@@ -460,6 +491,29 @@
           }
         },
         "required" : [ "color", "description", "doneCount", "id", "name", "state", "taskCount" ],
+        "type" : "object"
+      },
+      "Ref" : {
+        "properties" : {
+          "context" : {
+            "type" : [ "string", "null" ]
+          },
+          "date" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "kind" : {
+            "enum" : [ "task", "project", "event", "mail", "plms_course", "plms_file", "plms_notice", "plms_assignment", "plms_activity", "link" ],
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "kind", "title", "url" ],
         "type" : "object"
       },
       "RelationResponse" : {
@@ -1167,6 +1221,32 @@
         "tags" : [ "mail-controller" ]
       }
     },
+    "/api/v1/mail/message" : {
+      "get" : {
+        "operationId" : "message",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MailMessage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "mail-controller" ]
+      }
+    },
     "/api/v1/projects" : {
       "get" : {
         "operationId" : "projects",
@@ -1293,6 +1373,122 @@
           }
         },
         "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/refs" : {
+      "get" : {
+        "operationId" : "search",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "q",
+          "required" : false,
+          "schema" : {
+            "default" : "",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 12,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/Ref"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ref-controller" ]
+      }
+    },
+    "/api/v1/refs/backlinks" : {
+      "get" : {
+        "operationId" : "backlinks",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "url",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/Ref"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ref-controller" ]
+      }
+    },
+    "/api/v1/refs/plms/refresh" : {
+      "post" : {
+        "operationId" : "refreshPlms",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "format" : "int32",
+                    "type" : "integer"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ref-controller" ]
+      }
+    },
+    "/api/v1/refs/resolve" : {
+      "get" : {
+        "operationId" : "resolve",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "url",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Ref"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ref-controller" ]
       }
     },
     "/api/v1/sources" : {

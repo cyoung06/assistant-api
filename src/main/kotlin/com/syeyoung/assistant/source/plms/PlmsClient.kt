@@ -65,6 +65,19 @@ class PlmsClient(
         }
     }
 
+    /** Courses in progress: id and full name. */
+    suspend fun courses(): List<JsonNode> =
+        call("core_course_get_enrolled_courses_by_timeline_classification", mapOf("classification" to "inprogress")).path("courses").toList()
+
+    /** A PLMS page's HTML, as the logged-in user sees it. */
+    suspend fun page(url: String): String {
+        if (sesskey == null) login()
+        val first = send(HttpRequest.newBuilder(URI(url)).GET())
+        if (!first.uri().path.startsWith("/login/")) return first.body()
+        login()
+        return send(HttpRequest.newBuilder(URI(url)).GET()).body()
+    }
+
     private suspend fun login(): String = loginLock.withLock {
         cookies.cookieStore.removeAll()
         val form = send(HttpRequest.newBuilder(URI("$baseUrl/login/index.php")).GET())

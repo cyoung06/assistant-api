@@ -28,7 +28,7 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
     override val enabled = config.enabled && config.username.isNotBlank() && config.password.isNotBlank()
     override val interval: Duration = config.interval
 
-    private val client by lazy { PlmsClient(config.baseUrl.trimEnd('/'), config.username, config.password, mapper) }
+    val client by lazy { PlmsClient(config.baseUrl.trimEnd('/'), config.username, config.password, mapper) }
 
     override suspend fun fetch(now: Instant): SourceSnapshot {
         val from = now.minus(config.lookback)

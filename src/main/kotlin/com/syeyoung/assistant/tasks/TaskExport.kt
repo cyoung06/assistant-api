@@ -3,6 +3,7 @@ package com.syeyoung.assistant.tasks
 import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.dav.IcsDocument
 import com.syeyoung.assistant.dav.Workspace
+import com.syeyoung.assistant.refs.plainText
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.Duration
@@ -30,7 +31,7 @@ class TaskExport(private val repo: TaskRepository, private val clock: Clock, pro
             todo.set("DTSTAMP", stamp)
             todo.set("CREATED", Workspace.utc(t.createdAt))
             todo.set("LAST-MODIFIED", Workspace.utc(t.updatedAt))
-            todo.setText("SUMMARY", t.title)
+            todo.setText("SUMMARY", plainText(t.title))
             todo.setText("DESCRIPTION", t.description.ifBlank { null })
             todo.set("STATUS", STATUS.getValue(t.status))
             if (t.status == TaskStatus.DONE) {
@@ -61,7 +62,7 @@ class TaskExport(private val repo: TaskRepository, private val clock: Clock, pro
             e.set("DTSTART", Workspace.utc(at))
             e.set("DTEND", Workspace.utc(at.plus(DEADLINE_LENGTH)))
         }
-        e.setText("SUMMARY", "Due: ${t.title}")
+        e.setText("SUMMARY", "Due: ${plainText(t.title)}")
         e.set("URL", t.sourceUrl)
         e.set("RELATED-TO", uid(t.id))
         return e

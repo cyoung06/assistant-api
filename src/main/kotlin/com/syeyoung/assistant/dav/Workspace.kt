@@ -1,6 +1,7 @@
 package com.syeyoung.assistant.dav
 
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.refs.plainText
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.fortuna.ical4j.data.CalendarBuilder
@@ -102,7 +103,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
             href = obj.href,
             etag = obj.etag,
             calendarId = cal.id,
-            title = c.text("SUMMARY").orEmpty(),
+            title = titleOf(c),
             notes = c.text("DESCRIPTION").orEmpty(),
             start = if (allDay) null else instantOf(startProp),
             end = if (allDay) null else (endProp?.let { instantOf(it) } ?: instantOf(startProp)),
@@ -239,7 +240,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         val now = Instant.now(clock)
         c.set("DTSTAMP", utc(now))
         c.set("LAST-MODIFIED", utc(now))
-        c.setText("SUMMARY", f.title)
+        setTitle(c, f.title)
         c.setText("DESCRIPTION", f.notes.ifBlank { null })
         if (f.startDate != null) {
             c.set("DTSTART", DATE.format(f.startDate), mapOf("VALUE" to "DATE"))
@@ -270,6 +271,22 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         rrule = c.value("RRULE"),
         exdates = c.all("EXDATE").flatMap { p -> p.value.split(',').mapNotNull { v -> dateOf(IcsDocument.Prop("EXDATE", p.params, v)) ?: instantOf(IcsDocument.Prop("EXDATE", p.params, v))?.atZone(zone)?.toLocalDate() } },
     )
+
+    /**
+     * Titles may hold references (`[text](url)`). SUMMARY gets the plain text other apps can show; the
+     * linked title is kept in [TITLE_PROP] and used while SUMMARY still matches it (another app
+     * renaming the event wins).
+     */
+    private fun setTitle(c: IcsDocument.Comp, title: String) {
+        val plain = plainText(title)
+        c.setText("SUMMARY", plain)
+        c.setText(TITLE_PROP, title.takeIf { it != plain })
+    }
+
+    private fun titleOf(c: IcsDocument.Comp): String {
+        val summary = c.text("SUMMARY").orEmpty()
+        return c.text(TITLE_PROP)?.takeIf { plainText(it) == summary } ?: summary
+    }
 
     private fun setCategories(c: IcsDocument.Comp, categories: List<String>) {
         val clean = categories.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -339,6 +356,8 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
     companion object {
         /** Our own property marking an exporter's reference; other clients keep it untouched. */
         const val SOURCE_PROP = "X-ASSISTANT-SOURCE"
+        /** The title with its references, when it has any (SUMMARY holds the plain text). */
+        const val TITLE_PROP = "X-ASSISTANT-TITLE"
         const val ASSISTANT_SLUG = "assistant"
         private const val CACHE_SECONDS = 15L
         private const val SPAN_SLACK = 31L
