@@ -34,9 +34,9 @@ class FakeExtractor : ItemExtractor {
 }
 
 /**
- * The test database: `TEST_DB_HOST`/`TEST_DB_PORT` when set (CI provides a Postgres service there,
- * since Postgres refuses to run as root inside CI containers), otherwise one embedded Postgres
- * process for the whole run. Either way user, password and database are `postgres`.
+ * The test database: `TEST_DB_HOST`/`TEST_DB_PORT` when set (for environments that run as root,
+ * where Postgres refuses to start, so a separate Postgres is needed), otherwise one embedded
+ * Postgres process for the whole run. Either way user, password and database are `postgres`.
  */
 object TestDatabase {
     private val embedded by lazy { EmbeddedPostgres.builder().start() }

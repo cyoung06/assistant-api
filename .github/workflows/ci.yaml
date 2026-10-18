@@ -6,29 +6,21 @@ on:
   pull_request:
 
 env:
-  IMAGE: registry.syeyoung.dev/assistant/assistant-api
+  IMAGE: ghcr.io/cyoung06/assistant-api
 
 jobs:
   test:
-    # The runner image has Node (needed by actions like checkout); Java comes from setup-java.
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16.15-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-    env:
-      TEST_DB_HOST: postgres
-      TEST_DB_PORT: "5432"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
+      - uses: gradle/actions/setup-gradle@v4
+      # Tests start an embedded Postgres 16 (same major version as production).
       - name: Test
-        run: ./gradlew --no-daemon test
+        run: ./gradlew test
       - name: OpenAPI spec is up to date
         run: git diff --exit-code openapi.json
 
@@ -36,14 +28,17 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: registry.syeyoung.dev
-          username: ${{ vars.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Tag
         id: tag
         # <run number>-<short sha>: Flux picks the highest run number.
@@ -53,5 +48,6 @@ jobs:
           context: .
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
