@@ -22,29 +22,11 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.Temporal
 import java.util.UUID
 
-/** A calendar collection, shown as a colored list (one per course / main tag). */
+/** A calendar collection: one per source (Assistant, holidays, …), with its color. */
 data class Cal(val id: String, val href: String, val name: String, val color: String?)
 
+/** A VTODO DUE: a date, with a time unless all-day. */
 data class Due(val date: LocalDate, val time: LocalTime?)
-
-/** A VTODO. */
-data class Task(
-    val uid: String,
-    val href: String,
-    val etag: String?,
-    val calendarId: String,
-    val title: String,
-    val notes: String,
-    val due: Due?,
-    val start: Instant?,
-    val doneAt: Instant?,
-    val done: Boolean,
-    val categories: List<String>,
-    val parentUid: String?,
-    val url: String?,
-    /** Set on tasks an exporter owns, e.g. "plms:assign:123". */
-    val sourceRef: String?,
-)
 
 /** A VEVENT (the master, for repeating ones). */
 data class Event(
@@ -61,8 +43,6 @@ data class Event(
     val endDate: LocalDate?,
     val repeats: Boolean,
     val categories: List<String>,
-    /** The task this event is a work session for (RELATED-TO). */
-    val relatedUid: String?,
     val url: String?,
     val sourceRef: String?,
 )
@@ -70,10 +50,11 @@ data class Event(
 /** One concrete occurrence of an event within a range. */
 data class Occurrence(val event: Event, val start: Instant?, val end: Instant?, val startDate: LocalDate?, val endDate: LocalDate?)
 
-data class Snapshot(val calendars: List<Cal>, val tasks: List<Task>, val events: List<Event>, val docs: Map<String, IcsDocument>)
+/** Everything in CalDAV; [docs] holds every stored object (VTODOs from other clients included), by href. */
+data class Snapshot(val calendars: List<Cal>, val events: List<Event>, val docs: Map<String, IcsDocument>)
 
 /**
- * The workspace as the interop layer sees it: calendars, tasks and events read from CalDAV, and the
+ * The calendar as the interop layer sees it: calendars and events read from CalDAV, and the
  * writes that keep every client in agreement. Reads are cached briefly; every write refreshes.
  */
 @Component
@@ -95,7 +76,6 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
 
     private suspend fun load(): Snapshot {
         val calendars = dav.collections().map { Cal(slugOf(it.href), it.href, it.name, it.color?.uppercase()) }
-        val tasks = mutableListOf<Task>()
         val events = mutableListOf<Event>()
         val docs = mutableMapOf<String, IcsDocument>()
         for (cal in calendars) {
@@ -105,38 +85,13 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
                 } ?: continue
                 docs[obj.href] = doc
                 val main = doc.main ?: continue
-                when (main.name) {
-                    "VTODO" -> tasks += toTask(main, obj, cal)
-                    "VEVENT" -> toEvent(main, obj, cal)?.let(events::add)
-                }
+                if (main.name == "VEVENT") toEvent(main, obj, cal)?.let(events::add)
             }
         }
-        return Snapshot(calendars, tasks, events, docs)
+        return Snapshot(calendars, events, docs)
     }
 
     // ---- reading ---------------------------------------------------------------
-
-    private fun toTask(c: IcsDocument.Comp, obj: DavObject, cal: Cal): Task {
-        val due = c.prop("DUE")?.let(::dueOf)
-        val status = c.value("STATUS")?.uppercase()
-        val completed = c.prop("COMPLETED")?.let { instantOf(it) }
-        return Task(
-            uid = c.value("UID") ?: obj.href,
-            href = obj.href,
-            etag = obj.etag,
-            calendarId = cal.id,
-            title = c.text("SUMMARY").orEmpty(),
-            notes = c.text("DESCRIPTION").orEmpty(),
-            due = due,
-            start = c.prop("DTSTART")?.let { instantOf(it) },
-            doneAt = completed,
-            done = status == "COMPLETED" || completed != null,
-            categories = categoriesOf(c),
-            parentUid = c.all("RELATED-TO").firstOrNull { (it.param("RELTYPE") ?: "PARENT").equals("PARENT", true) }?.value,
-            url = c.value("URL"),
-            sourceRef = c.value(SOURCE_PROP),
-        )
-    }
 
     private fun toEvent(c: IcsDocument.Comp, obj: DavObject, cal: Cal): Event? {
         val startProp = c.prop("DTSTART") ?: return null
@@ -155,7 +110,6 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
             endDate = if (allDay) (endProp?.let { dateOf(it)?.minusDays(1) } ?: dateOf(startProp)) else null,
             repeats = c.prop("RRULE") != null || c.prop("RDATE") != null,
             categories = categoriesOf(c),
-            relatedUid = c.value("RELATED-TO"),
             url = c.value("URL"),
             sourceRef = c.value(SOURCE_PROP),
         )
@@ -212,17 +166,6 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
 
     // ---- writing ---------------------------------------------------------------
 
-    data class TaskFields(
-        val title: String,
-        val notes: String = "",
-        val due: Due? = null,
-        val done: Boolean = false,
-        val categories: List<String> = emptyList(),
-        val parentUid: String? = null,
-        val url: String? = null,
-        val sourceRef: String? = null,
-    )
-
     data class EventFields(
         val title: String,
         val notes: String = "",
@@ -232,33 +175,12 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         /** Inclusive. */
         val endDate: LocalDate? = null,
         val categories: List<String> = emptyList(),
-        val relatedUid: String? = null,
         val url: String? = null,
         val sourceRef: String? = null,
         /** An RRULE value, e.g. "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261225T145959Z". */
         val rrule: String? = null,
         val exdates: List<LocalDate> = emptyList(),
     )
-
-    suspend fun createTask(calendarId: String, f: TaskFields, uid: String = newUid()): Task {
-        val c = IcsDocument.Comp("VTODO")
-        c.set("UID", uid)
-        c.set("CREATED", utc(Instant.now(clock)))
-        applyTask(c, f)
-        return put(calendarId, uid, IcsDocument.create(c), null).let { (href, _) -> findTask(uid) ?: error("created $href but can't read it") }
-    }
-
-    /** Replaces the task's fields we manage; everything else in the object is kept. */
-    suspend fun updateTask(task: Task, update: (TaskFields) -> TaskFields): Task {
-        val s = snapshot()
-        val doc = s.docs[task.href]?.let { IcsDocument.parse(it.serialize()) } ?: error("no document for ${task.href}")
-        val c = doc.main!!
-        applyTask(c, update(fieldsOf(task)))
-        c.set("SEQUENCE", ((c.value("SEQUENCE")?.toIntOrNull() ?: 0) + 1).toString())
-        dav.put(task.href, doc.serialize(), task.etag)
-        invalidate()
-        return findTask(task.uid)!!
-    }
 
     suspend fun createEvent(calendarId: String, f: EventFields, uid: String = newUid()): Event {
         val c = IcsDocument.Comp("VEVENT")
@@ -275,22 +197,15 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         val s = snapshot()
         val doc = s.docs[event.href]?.let { IcsDocument.parse(it.serialize()) } ?: error("no document for ${event.href}")
         val c = doc.main!!
-        applyEvent(c, update(fieldsOf(event, c)))
+        val f = update(fieldsOf(event, c))
+        applyEvent(c, f)
+        if (f.rrule != null && doc.root.children.none { it.name == "VTIMEZONE" && it.value("TZID") == zone.id }) doc.root.children.add(0, seoulTimezone())
         c.set("SEQUENCE", ((c.value("SEQUENCE")?.toIntOrNull() ?: 0) + 1).toString())
         dav.put(event.href, doc.serialize(), event.etag)
         invalidate()
     }
 
     suspend fun delete(href: String, etag: String?) {
-        dav.delete(href, etag)
-        invalidate()
-    }
-
-    /** Moves an object to another calendar: store it there, then delete the original. */
-    suspend fun move(href: String, etag: String?, uid: String, calendarId: String) {
-        val s = snapshot()
-        val doc = s.docs[href] ?: error("no document for $href")
-        put(calendarId, uid, doc, null)
         dav.delete(href, etag)
         invalidate()
     }
@@ -306,16 +221,10 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         invalidate()
     }
 
-    suspend fun deleteCalendar(cal: Cal) {
-        dav.deleteCollection(cal.href)
-        invalidate()
-    }
-
     /** The assistant's own calendar: where everything created through the app goes. */
     suspend fun assistantCalendar(): Cal =
         snapshot().calendars.find { it.id == ASSISTANT_SLUG } ?: createCalendar("Assistant", "#2F5BE0", slug = ASSISTANT_SLUG)
 
-    suspend fun findTask(uid: String): Task? = snapshot().tasks.find { it.uid == uid }
     suspend fun findEvent(uid: String): Event? = snapshot().events.find { it.uid == uid }
 
     private suspend fun put(calendarId: String, uid: String, doc: IcsDocument, etag: String?): Pair<String, String?> {
@@ -324,34 +233,6 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         val tag = dav.put(href, doc.serialize(), etag)
         invalidate()
         return href to tag
-    }
-
-    private fun applyTask(c: IcsDocument.Comp, f: TaskFields) {
-        val now = Instant.now(clock)
-        c.set("DTSTAMP", utc(now))
-        c.set("LAST-MODIFIED", utc(now))
-        c.setText("SUMMARY", f.title)
-        c.setText("DESCRIPTION", f.notes.ifBlank { null })
-        when {
-            f.due == null -> c.set("DUE", null)
-            f.due.time == null -> c.set("DUE", DATE.format(f.due.date), mapOf("VALUE" to "DATE"))
-            else -> c.set("DUE", utc(f.due.date.atTime(f.due.time).atZone(zone).toInstant()))
-        }
-        val wasDone = c.value("STATUS")?.uppercase() == "COMPLETED" || c.prop("COMPLETED") != null
-        if (f.done) {
-            c.set("STATUS", "COMPLETED")
-            c.set("PERCENT-COMPLETE", "100")
-            if (!wasDone) c.set("COMPLETED", utc(now))
-        } else {
-            c.set("STATUS", "NEEDS-ACTION")
-            c.set("PERCENT-COMPLETE", null)
-            c.set("COMPLETED", null)
-        }
-        setCategories(c, f.categories)
-        c.props.removeAll { it.name == "RELATED-TO" && (it.param("RELTYPE") ?: "PARENT").equals("PARENT", true) }
-        f.parentUid?.let { c.props += IcsDocument.Prop("RELATED-TO", mapOf("RELTYPE" to "PARENT"), it) }
-        c.set("URL", f.url)
-        c.set(SOURCE_PROP, f.sourceRef)
     }
 
     private fun applyEvent(c: IcsDocument.Comp, f: EventFields) {
@@ -371,24 +252,21 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
             c.set("DTSTART", utc(f.start!!))
             c.set("DTEND", utc(f.end ?: f.start))
         }
+        c.set("RRULE", f.rrule)
+        c.props.removeAll { it.name == "EXDATE" }
         if (f.rrule != null) {
-            c.set("RRULE", f.rrule)
-            c.props.removeAll { it.name == "EXDATE" }
             f.exdates.forEach { d ->
                 c.props += if (f.startDate != null) IcsDocument.Prop("EXDATE", mapOf("VALUE" to "DATE"), DATE.format(d))
                 else IcsDocument.Prop("EXDATE", mapOf("TZID" to zone.id), LOCAL.format(d.atTime(f.start!!.atZone(zone).toLocalTime())))
             }
         }
         setCategories(c, f.categories)
-        c.set("RELATED-TO", f.relatedUid)
         c.set("URL", f.url)
         c.set(SOURCE_PROP, f.sourceRef)
     }
 
-    fun fieldsOf(t: Task) = TaskFields(t.title, t.notes, t.due, t.done, t.categories, t.parentUid, t.url, t.sourceRef)
-
-    private fun fieldsOf(e: Event, c: IcsDocument.Comp) = EventFields(
-        e.title, e.notes, e.start, e.end, e.startDate, e.endDate, e.categories, e.relatedUid, e.url, e.sourceRef,
+    fun fieldsOf(e: Event, c: IcsDocument.Comp) = EventFields(
+        e.title, e.notes, e.start, e.end, e.startDate, e.endDate, e.categories, e.url, e.sourceRef,
         rrule = c.value("RRULE"),
         exdates = c.all("EXDATE").flatMap { p -> p.value.split(',').mapNotNull { v -> dateOf(IcsDocument.Prop("EXDATE", p.params, v)) ?: instantOf(IcsDocument.Prop("EXDATE", p.params, v))?.atZone(zone)?.toLocalDate() } },
     )
@@ -398,7 +276,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         c.set("CATEGORIES", clean.takeIf { it.isNotEmpty() }?.joinToString(",") { it.replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;") })
     }
 
-    private fun categoriesOf(c: IcsDocument.Comp): List<String> =
+    fun categoriesOf(c: IcsDocument.Comp): List<String> =
         c.all("CATEGORIES").flatMap { splitUnescaped(it.value) }.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
     private fun splitUnescaped(value: String): List<String> {
@@ -420,7 +298,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
 
     private fun isDate(p: IcsDocument.Prop) = p.param("VALUE").equals("DATE", true) || p.value.length == 8
 
-    private fun dueOf(p: IcsDocument.Prop): Due? {
+    fun dueOf(p: IcsDocument.Prop): Due? {
         if (isDate(p)) return dateOf(p)?.let { Due(it, null) }
         val at = instantOf(p)?.atZone(zone) ?: return null
         return Due(at.toLocalDate(), at.toLocalTime().withSecond(0).withNano(0))
@@ -429,7 +307,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
     private fun dateOf(p: IcsDocument.Prop): LocalDate? =
         if (isDate(p)) runCatching { LocalDate.parse(p.value.take(8), DATE) }.getOrNull() else null
 
-    private fun instantOf(p: IcsDocument.Prop): Instant? = runCatching {
+    fun instantOf(p: IcsDocument.Prop): Instant? = runCatching {
         if (isDate(p)) return@runCatching LocalDate.parse(p.value.take(8), DATE).atStartOfDay(zone).toInstant()
         if (p.value.endsWith("Z")) return@runCatching LocalDateTime.parse(p.value.dropLast(1), LOCAL).toInstant(ZoneOffset.UTC)
         val tz = p.param("TZID")?.let { runCatching { ZoneId.of(it.trim('"')) }.getOrNull() } ?: zone

@@ -3,7 +3,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     kotlin("jvm") version "2.3.21"
     kotlin("plugin.spring") version "2.3.21"
-    kotlin("plugin.serialization") version "2.3.21"
     id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
 }
@@ -16,8 +15,6 @@ java {
         languageVersion = JavaLanguageVersion.of(21)
     }
 }
-
-val koogVersion = "1.3.0"
 
 repositories {
     mavenCentral()
@@ -34,12 +31,6 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.1.1")
-
-    // LLM access (quick add, capture) through Koog, over Spring's WebClient.
-    implementation("ai.koog:prompt-executor-model:$koogVersion")
-    implementation("ai.koog:prompt-executor-openai-client:$koogVersion")
-    implementation("ai.koog:http-client-spring-webclient:$koogVersion")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json")
 
     // iCalendar recurrence expansion (any RRULE a calendar app may write).
     implementation("org.mnode.ical4j:ical4j:4.4.0")

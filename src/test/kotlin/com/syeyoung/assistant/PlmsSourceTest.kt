@@ -45,7 +45,8 @@ class PlmsSourceTest {
         assertThat(record.dueDate).isEqualTo(LocalDate.of(2026, 10, 20))
         assertThat(record.dueTime).isEqualTo(LocalTime.of(19, 0))
         assertThat(record.url).isEqualTo("https://plms.postech.ac.kr/mod/assign/view.php?id=77")
-        assertThat(record.tags).containsExactly(SourceTag("course:15", "확률및통계"), SourceTag("module:assign", "assignment"))
+        assertThat(record.project).isEqualTo(SourceTag("course:15", "확률및통계"))
+        assertThat(record.tags).containsExactly(SourceTag("module:assign", "assignment"))
     }
 
     @Test

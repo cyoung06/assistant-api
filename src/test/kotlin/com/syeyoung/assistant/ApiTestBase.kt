@@ -2,8 +2,6 @@ package com.syeyoung.assistant
 
 import com.syeyoung.assistant.dav.CalDav
 import com.syeyoung.assistant.dav.Workspace
-import com.syeyoung.assistant.quickadd.ItemExtractor
-import com.syeyoung.assistant.quickadd.LlmDraft
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
@@ -23,17 +21,6 @@ import org.springframework.test.context.DynamicPropertySource
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
-
-/** Fake LLM: tests set [next] to the draft (or error) the next call should produce. */
-class FakeExtractor : ItemExtractor {
-    var next: () -> LlmDraft = { error("no draft configured") }
-    var lastInstructions: String? = null
-    override val configured = true
-    override suspend fun extract(instructions: String, text: String): LlmDraft {
-        lastInstructions = instructions
-        return next()
-    }
-}
 
 /**
  * The test database: `TEST_DB_HOST`/`TEST_DB_PORT` when set (for environments that run as root,
@@ -55,10 +42,6 @@ class TestInfra {
     fun testClock(): Clock = Clock.fixed(Instant.parse("2026-10-18T01:00:00Z"), ZoneId.of("Asia/Seoul"))
 
     @Bean
-    @Primary
-    fun fakeExtractor() = FakeExtractor()
-
-    @Bean
     fun fakeSource() = FakeSource()
 }
 
@@ -67,7 +50,6 @@ class TestInfra {
 abstract class ApiTestBase {
     @Autowired lateinit var context: ApplicationContext
     @Autowired lateinit var db: DatabaseClient
-    @Autowired lateinit var extractor: FakeExtractor
     @Autowired lateinit var dav: CalDav
     @Autowired lateinit var ws: Workspace
 
@@ -94,7 +76,8 @@ abstract class ApiTestBase {
     @BeforeEach
     fun setUp() {
         runBlocking {
-            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, items, series, tags, source_tags").await()
+            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations").await()
+            db.sql("alter sequence task_number restart").await()
             // Every test starts with an empty CalDAV home.
             dav.collections().forEach { dav.deleteCollection(it.href) }
             ws.invalidate()
@@ -127,6 +110,10 @@ abstract class ApiTestBase {
             .bodyValue(body)
             .exchange().expectStatus().isOk
             .expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
+
+    fun delete(path: String) {
+        client.delete().uri(path).exchange().expectStatus().isNoContent
+    }
 
     /** Puts a raw iCalendar object into the assistant's calendar, as another CalDAV app would. */
     fun putRaw(name: String, ics: String) = runBlocking {

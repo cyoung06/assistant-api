@@ -15,8 +15,8 @@ import java.time.ZoneId
 
 /**
  * PLMS (POSTECH's Moodle): every assignment, quiz and other deadline on your PLMS to-do list
- * becomes an item due at the PLMS deadline, tagged with its course. Once something is submitted it
- * leaves the to-do list, and the item is marked done.
+ * becomes a task due at the PLMS deadline, in its course's project and labeled by type. Once
+ * something is submitted it leaves the to-do list, and the task is marked done.
  */
 @Component
 class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataSource {
@@ -50,12 +50,9 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
             val instance = event.path("instance").asLong(0)
             val due = Instant.ofEpochSecond(event.path("timesort").asLong()).atZone(zone)
             val course = event.path("course")
-            val tags = buildList {
-                if (!course.isMissingNode && course.has("id")) {
-                    add(SourceTag("course:${course.path("id").asLong()}", courseName(course.path("fullname").asString(""))))
-                }
-                MODULE_TAGS[module]?.let { add(SourceTag("module:$module", it)) }
-            }
+            val project = if (!course.isMissingNode && course.has("id")) {
+                SourceTag("course:${course.path("id").asLong()}", courseName(course.path("fullname").asString("")))
+            } else null
             return SourceRecord(
                 ref = if (module.isNotEmpty() && instance > 0) "$module:$instance" else "event:${event.path("id").asLong()}",
                 title = cleanTitle(event.path("name").asString("")),
@@ -63,7 +60,8 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
                 dueTime = due.toLocalTime().withSecond(0).withNano(0),
                 url = event.path("url").asString(null)?.takeIf { it.isNotBlank() }
                     ?: event.path("action").path("url").asString(null),
-                tags = tags,
+                tags = listOfNotNull(MODULE_TAGS[module]?.let { SourceTag("module:$module", it) }),
+                project = project,
             )
         }
 

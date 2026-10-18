@@ -6,6 +6,7 @@ import com.syeyoung.assistant.source.SourceSnapshot
 import com.syeyoung.assistant.source.SourceTag
 import com.syeyoung.assistant.source.SourceType
 import kotlinx.coroutines.runBlocking
+import org.springframework.r2dbc.core.await
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -41,8 +42,8 @@ class SourceSyncTest : ApiTestBase() {
     private val stats = SourceTag("course:15", "확률및통계")
     private val assignment = SourceTag("module:assign", "assignment")
 
-    private fun record(ref: String, title: String, due: String, vararg tags: SourceTag) =
-        SourceRecord(ref, title, LocalDate.parse(due), LocalTime.of(23, 59), url = "https://example.test/$ref", tags = tags.toList())
+    private fun record(ref: String, title: String, due: String, project: SourceTag? = stats, vararg labels: SourceTag) =
+        SourceRecord(ref, title, LocalDate.parse(due), LocalTime.of(23, 59), url = "https://example.test/$ref", tags = labels.toList(), project = project)
 
     @Suppress("UNCHECKED_CAST")
     private fun sync(): Map<String, Any?> =
@@ -51,21 +52,24 @@ class SourceSyncTest : ApiTestBase() {
 
     private fun report() = sync()["lastReport"] as Map<*, *>
 
-    private fun synced() = getList("/api/v1/tasks?status=all").filter { it["source"] == "email" }
+    private fun synced() = getList("/api/v1/tasks").filter { it["source"] == "email" }
 
     @Test
-    fun `creates tasks in the source's own calendar, then updates only what the source owns`() {
+    fun `creates tasks in a project with labels, then updates only what the source owns`() {
         fake.snapshot = SourceSnapshot(listOf(record("assign:1", "HW6", "2026-10-20", stats, assignment)))
         assertThat(report()["created"]).isEqualTo(1)
-
         val task = synced().single()
-        assertThat(task["calendarName"]).isEqualTo("Fake")
-        assertThat(task["fixed"]).isEqualTo(true)
-        assertThat(task["categories"]).isEqualTo(listOf("확률및통계", "assignment"))
+        val project = getList("/api/v1/projects").single()
+        assertThat(project).containsEntry("name", "확률및통계").containsEntry("source", "email")
+        assertThat(task["projectId"]).isEqualTo(project["id"])
+        val label = getList("/api/v1/labels").single()
+        assertThat(label["name"]).isEqualTo("assignment")
+        assertThat(task["labelIds"]).isEqualTo(listOf(label["id"]))
+        assertThat(task["url"]).isEqualTo("https://example.test/assign:1")
         val id = task["id"] as String
 
-        // The user adds a category and a note and starts a sub-task; the source then moves the deadline.
-        patch("/api/v1/tasks/$id", mapOf("notes" to "start early", "categories" to listOf("확률및통계", "assignment", "important")))
+        // The user sets priority, status and a description and starts a sub-task; the source then moves the deadline.
+        patch("/api/v1/tasks/$id", mapOf("priority" to "high", "status" to "in_progress", "description" to "start early"))
         // Title and deadline belong to the source.
         client.patch().uri("/api/v1/tasks/$id").bodyValue(mapOf("title" to "mine")).exchange().expectStatus().isEqualTo(409)
         post("/api/v1/tasks", mapOf("title" to "read chapter 5", "parentId" to id))
@@ -75,8 +79,7 @@ class SourceSyncTest : ApiTestBase() {
         val updated = get("/api/v1/tasks/$id")
         assertThat(updated["title"]).isEqualTo("HW6 (revised)")
         assertThat((updated["due"] as Map<*, *>)["date"]).isEqualTo("2026-10-22")
-        assertThat(updated["notes"]).isEqualTo("start early")
-        assertThat(updated["categories"]).isEqualTo(listOf("확률및통계", "assignment", "important"))
+        assertThat(updated).containsEntry("description", "start early").containsEntry("priority", "high").containsEntry("status", "in_progress")
         assertThat(updated["subtasks"]).isEqualTo(1)
         assertThat(report()["unchanged"]).isEqualTo(1)
     }
@@ -85,22 +88,35 @@ class SourceSyncTest : ApiTestBase() {
     fun `missing tasks are completed and deleted ones stay deleted`() {
         val from = Instant.parse("2026-10-04T01:00:00Z")
         fake.snapshot = SourceSnapshot(
-            listOf(record("assign:1", "Submitted", "2026-10-20", stats), record("assign:2", "Deleted by me", "2026-10-21", stats), record("assign:3", "Open", "2026-10-22", SourceTag("course:16", "확률및통계"))),
+            listOf(record("assign:1", "Submitted", "2026-10-20"), record("assign:2", "Deleted by me", "2026-10-21"), record("assign:3", "Open", "2026-10-22", SourceTag("course:16", "확률및통계"))),
             completeMissingDueFrom = from,
         )
         sync()
-        assertThat(getList("/api/v1/calendars").map { it["name"] }).containsExactly("Fake")
+        // Calendars are only for events.
+        assertThat(getList("/api/v1/calendars")).isEmpty()
         val byTitle = synced().associateBy { it["title"] }
-        client.delete().uri("/api/v1/tasks/${byTitle["Deleted by me"]!!["id"]}").exchange().expectStatus().isNoContent
+        delete("/api/v1/tasks/${byTitle["Deleted by me"]!!["id"]}")
 
-        fake.snapshot = SourceSnapshot(listOf(record("assign:2", "Deleted by me", "2026-10-21", stats), record("assign:3", "Open", "2026-10-22", stats)), completeMissingDueFrom = from)
+        fake.snapshot = SourceSnapshot(listOf(record("assign:2", "Deleted by me", "2026-10-21"), record("assign:3", "Open", "2026-10-22")), completeMissingDueFrom = from)
         val r = report()
         assertThat(r["completed"]).isEqualTo(1)
         assertThat(r["skippedDeleted"]).isEqualTo(1)
         val after = synced().associateBy { it["title"] }
-        assertThat(after["Submitted"]!!["done"]).isEqualTo(true)
-        assertThat(after["Open"]!!["done"]).isEqualTo(false)
+        assertThat(after["Submitted"]!!["status"]).isEqualTo("done")
+        assertThat(after["Open"]!!["status"]).isEqualTo("todo")
         assertThat(after).doesNotContainKey("Deleted by me")
+    }
+
+    @Test
+    fun `a same-named project from before is claimed instead of duplicated`() {
+        runBlocking {
+            db.sql("insert into projects (id, name, color, source_type) values (gen_random_uuid(), '확률및통계', '#2F5BE0', 'email')").await()
+        }
+        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "A", "2026-10-20"), record("assign:2", "B", "2026-10-21")))
+        sync()
+        val projects = getList("/api/v1/projects")
+        assertThat(projects).hasSize(1)
+        assertThat(synced().map { it["projectId"] }.toSet()).containsExactly(projects.single()["id"])
     }
 
     @Test
@@ -110,28 +126,19 @@ class SourceSyncTest : ApiTestBase() {
         fun day(ref: String, title: String, date: String) = SourceRecord(ref, title, atStartDate = LocalDate.parse(date), atEndDate = LocalDate.parse(date), tags = listOf(holiday), calendar = cal)
         fake.snapshot = SourceSnapshot(listOf(day("kr:hangul", "한글날", "2026-10-09"), day("kr:xmas", "기독탄신일", "2026-12-25")), deleteMissing = true)
         sync()
-        assertThat(getList("/api/v1/agenda?from=2026-10-01&to=2026-12-31").map { it["title"] }).containsExactly("한글날", "기독탄신일")
+        assertThat(getList("/api/v1/events?from=2026-10-01&to=2026-12-31").map { it["title"] }).containsExactly("한글날", "기독탄신일")
 
         fake.snapshot = SourceSnapshot(listOf(day("kr:hangul", "한글날", "2026-10-10")), deleteMissing = true)
         val r = report()
         assertThat(r["deleted"]).isEqualTo(1)
         assertThat(r["updated"]).isEqualTo(1)
-        val after = getList("/api/v1/agenda?from=2026-10-01&to=2026-12-31")
+        val after = getList("/api/v1/events?from=2026-10-01&to=2026-12-31")
         assertThat(after.map { it["title"] to it["startDate"] }).containsExactly("한글날" to "2026-10-10")
         assertThat(after.single()["calendarName"]).isEqualTo("Korean holidays")
         assertThat(after.single()["categories"]).isEqualTo(listOf("holiday"))
         assertThat(after.single()["fixed"]).isEqualTo(true)
-    }
-
-    @Test
-    fun `a source's calendar comes back if it was deleted`() {
-        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "A", "2026-10-20", stats)))
-        sync()
-        runBlocking { dav.collections().forEach { dav.deleteCollection(it.href) }; ws.invalidate() }
-        fake.snapshot = SourceSnapshot(listOf(record("assign:2", "B", "2026-10-21", stats)))
-        sync()
-        assertThat(getList("/api/v1/calendars").map { it["name"] }).containsExactly("Fake")
-        assertThat(synced().map { it["title"] }).containsExactly("B")
+        assertThat(getList("/api/v1/calendars").single()["fixed"]).isEqualTo(true)
+        client.delete().uri("/api/v1/events/${after.single()["id"]}").exchange().expectStatus().isEqualTo(409)
     }
 
     @Test

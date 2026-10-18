@@ -1,37 +1,9 @@
 {
   "components" : {
     "schemas" : {
-      "AgendaEntry" : {
+      "CalendarResponse" : {
         "properties" : {
-          "calendarName" : {
-            "type" : "string"
-          },
-          "categories" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          },
           "color" : {
-            "type" : [ "string", "null" ]
-          },
-          "date" : {
-            "format" : "date",
-            "type" : [ "string", "null" ]
-          },
-          "done" : {
-            "type" : "boolean"
-          },
-          "due" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "end" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "endDate" : {
-            "format" : "date",
             "type" : [ "string", "null" ]
           },
           "fixed" : {
@@ -40,51 +12,11 @@
           "id" : {
             "type" : "string"
           },
-          "kind" : {
-            "enum" : [ "block", "allDayBlock", "deadline", "allDayDeadline" ],
-            "type" : "string"
-          },
-          "overdue" : {
-            "type" : "boolean"
-          },
-          "repeats" : {
-            "type" : "boolean"
-          },
-          "start" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "startDate" : {
-            "format" : "date",
-            "type" : [ "string", "null" ]
-          },
-          "taskId" : {
-            "type" : [ "string", "null" ]
-          },
-          "title" : {
-            "type" : "string"
-          }
-        },
-        "required" : [ "calendarName", "categories", "done", "fixed", "id", "kind", "overdue", "repeats", "title" ],
-        "type" : "object"
-      },
-      "CalendarResponse" : {
-        "properties" : {
-          "color" : {
-            "type" : [ "string", "null" ]
-          },
-          "id" : {
-            "type" : "string"
-          },
           "name" : {
             "type" : "string"
-          },
-          "openTasks" : {
-            "format" : "int32",
-            "type" : "integer"
           }
         },
-        "required" : [ "id", "name", "openTasks" ],
+        "required" : [ "fixed", "id", "name" ],
         "type" : "object"
       },
       "CreateEventRequest" : {
@@ -106,15 +38,19 @@
           "notes" : {
             "type" : "string"
           },
+          "repeat" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/RepeatDto"
+            }, {
+              "type" : "null"
+            } ]
+          },
           "start" : {
             "format" : "date-time",
             "type" : [ "string", "null" ]
           },
           "startDate" : {
             "format" : "date",
-            "type" : [ "string", "null" ]
-          },
-          "taskId" : {
             "type" : [ "string", "null" ]
           },
           "title" : {
@@ -124,13 +60,42 @@
         "required" : [ "title" ],
         "type" : "object"
       },
+      "CreateProjectRequest" : {
+        "properties" : {
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "state" : {
+            "enum" : [ "backlog", "planned", "in_progress", "paused", "completed", "canceled" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "name" ],
+        "type" : "object"
+      },
+      "CreateRelationRequest" : {
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "taskId" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "kind", "taskId" ],
+        "type" : "object"
+      },
       "CreateTaskRequest" : {
         "properties" : {
-          "categories" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
+          "description" : {
+            "type" : "string"
           },
           "due" : {
             "oneOf" : [ {
@@ -139,11 +104,28 @@
               "type" : "null"
             } ]
           },
-          "notes" : {
-            "type" : "string"
+          "labelIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "parentId" : {
+            "format" : "uuid",
             "type" : [ "string", "null" ]
+          },
+          "priority" : {
+            "enum" : [ "none", "urgent", "high", "medium", "low" ],
+            "type" : "string"
+          },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "enum" : [ "backlog", "todo", "in_progress", "done", "canceled" ],
+            "type" : "string"
           },
           "title" : {
             "type" : "string"
@@ -164,6 +146,117 @@
           }
         },
         "required" : [ "date" ],
+        "type" : "object"
+      },
+      "EventOccurrence" : {
+        "properties" : {
+          "calendarId" : {
+            "type" : "string"
+          },
+          "calendarName" : {
+            "type" : "string"
+          },
+          "categories" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "endDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "fixed" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "repeats" : {
+            "type" : "boolean"
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "calendarId", "calendarName", "categories", "fixed", "id", "repeats", "title" ],
+        "type" : "object"
+      },
+      "EventResponse" : {
+        "properties" : {
+          "calendarId" : {
+            "type" : "string"
+          },
+          "calendarName" : {
+            "type" : "string"
+          },
+          "categories" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "endDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "fixed" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : "string"
+          },
+          "repeat" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/RepeatDto"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "repeats" : {
+            "type" : "boolean"
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "calendarId", "calendarName", "categories", "fixed", "id", "notes", "repeats", "title" ],
         "type" : "object"
       },
       "FeedInfo" : {
@@ -258,112 +351,139 @@
         },
         "type" : "object"
       },
-      "MoveEventRequest" : {
+      "LabelRequest" : {
         "properties" : {
-          "end" : {
-            "format" : "date-time",
+          "color" : {
             "type" : [ "string", "null" ]
           },
-          "endDate" : {
-            "format" : "date",
-            "type" : [ "string", "null" ]
-          },
-          "start" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "startDate" : {
-            "format" : "date",
+          "name" : {
             "type" : [ "string", "null" ]
           }
         },
         "type" : "object"
       },
-      "QuickAddDraft" : {
+      "LabelResponse" : {
         "properties" : {
-          "categories" : {
+          "color" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "color", "id", "name" ],
+        "type" : "object"
+      },
+      "MoveReport" : {
+        "properties" : {
+          "labels" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "moved" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "projects" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "labels", "moved", "projects", "skipped" ],
+        "type" : "object"
+      },
+      "ProjectResponse" : {
+        "properties" : {
+          "color" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "doneCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "source" : {
+            "type" : [ "string", "null" ]
+          },
+          "state" : {
+            "enum" : [ "backlog", "planned", "in_progress", "paused", "completed", "canceled" ],
+            "type" : "string"
+          },
+          "taskCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "color", "description", "doneCount", "id", "name", "state", "taskCount" ],
+        "type" : "object"
+      },
+      "RelationResponse" : {
+        "properties" : {
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "enum" : [ "blocks", "blocked_by", "related", "duplicate_of", "duplicated_by" ],
+            "type" : "string"
+          },
+          "task" : {
+            "$ref" : "#/components/schemas/TaskRef"
+          }
+        },
+        "required" : [ "id", "kind", "task" ],
+        "type" : "object"
+      },
+      "RepeatDto" : {
+        "properties" : {
+          "count" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "freq" : {
+            "enum" : [ "daily", "weekly", "monthly" ],
+            "type" : "string"
+          },
+          "interval" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skipped" : {
             "items" : {
+              "format" : "date",
               "type" : "string"
             },
             "type" : "array"
           },
-          "due" : {
-            "oneOf" : [ {
-              "$ref" : "#/components/schemas/DueDto"
-            }, {
-              "type" : "null"
-            } ]
-          },
-          "end" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "endDate" : {
+          "until" : {
             "format" : "date",
             "type" : [ "string", "null" ]
           },
-          "kind" : {
-            "type" : "string"
-          },
-          "notes" : {
-            "type" : "string"
-          },
-          "start" : {
-            "format" : "date-time",
-            "type" : [ "string", "null" ]
-          },
-          "startDate" : {
-            "format" : "date",
-            "type" : [ "string", "null" ]
-          },
-          "title" : {
-            "type" : "string"
+          "weekdays" : {
+            "items" : {
+              "enum" : [ "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY" ],
+              "type" : "string"
+            },
+            "type" : "array"
           }
         },
-        "required" : [ "kind", "title" ],
-        "type" : "object"
-      },
-      "QuickAddRequest" : {
-        "properties" : {
-          "text" : {
-            "type" : "string"
-          }
-        },
-        "required" : [ "text" ],
-        "type" : "object"
-      },
-      "QuickAddResult" : {
-        "properties" : {
-          "draft" : {
-            "$ref" : "#/components/schemas/QuickAddDraft"
-          },
-          "parsed" : {
-            "type" : "boolean"
-          }
-        },
-        "required" : [ "draft", "parsed" ],
-        "type" : "object"
-      },
-      "RestructureReport" : {
-        "properties" : {
-          "calendarsRemoved" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "feedEventsDropped" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "movedToAssistant" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "movedToPlms" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        },
-        "required" : [ "calendarsRemoved", "feedEventsDropped", "movedToAssistant", "movedToPlms" ],
         "type" : "object"
       },
       "SourceStatus" : {
@@ -436,29 +556,42 @@
         },
         "type" : "object"
       },
+      "TaskRef" : {
+        "properties" : {
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "number" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "enum" : [ "backlog", "todo", "in_progress", "done", "canceled" ],
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "number", "status", "title" ],
+        "type" : "object"
+      },
       "TaskResponse" : {
         "properties" : {
-          "calendarId" : {
-            "type" : "string"
-          },
-          "calendarName" : {
-            "type" : "string"
-          },
-          "categories" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          },
-          "color" : {
-            "type" : [ "string", "null" ]
-          },
-          "done" : {
+          "blocked" : {
             "type" : "boolean"
           },
-          "doneAt" : {
+          "closedAt" : {
             "format" : "date-time",
             "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
           },
           "due" : {
             "oneOf" : [ {
@@ -467,34 +600,48 @@
               "type" : "null"
             } ]
           },
-          "etag" : {
-            "type" : [ "string", "null" ]
-          },
-          "fixed" : {
-            "type" : "boolean"
-          },
           "id" : {
+            "format" : "uuid",
             "type" : "string"
           },
-          "minutesPlanned" : {
+          "labelIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "number" : {
             "format" : "int64",
             "type" : "integer"
-          },
-          "minutesSpent" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "notes" : {
-            "type" : "string"
           },
           "overdue" : {
             "type" : "boolean"
           },
           "parentId" : {
+            "format" : "uuid",
             "type" : [ "string", "null" ]
+          },
+          "priority" : {
+            "enum" : [ "none", "urgent", "high", "medium", "low" ],
+            "type" : "string"
+          },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "relations" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RelationResponse"
+            },
+            "type" : "array"
           },
           "source" : {
             "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "enum" : [ "backlog", "todo", "in_progress", "done", "canceled" ],
+            "type" : "string"
           },
           "subtasks" : {
             "format" : "int32",
@@ -507,11 +654,19 @@
           "title" : {
             "type" : "string"
           },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
           "url" : {
             "type" : [ "string", "null" ]
+          },
+          "version" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
-        "required" : [ "calendarId", "calendarName", "categories", "done", "fixed", "id", "minutesPlanned", "minutesSpent", "notes", "overdue", "subtasks", "subtasksDone", "title" ],
+        "required" : [ "blocked", "createdAt", "description", "id", "labelIds", "number", "overdue", "priority", "relations", "status", "subtasks", "subtasksDone", "title", "updatedAt", "version" ],
         "type" : "object"
       },
       "UpdateCalendarRequest" : {
@@ -520,6 +675,24 @@
             "type" : [ "string", "null" ]
           },
           "name" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "UpdateProjectRequest" : {
+        "properties" : {
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "description" : {
+            "type" : [ "string", "null" ]
+          },
+          "name" : {
+            "type" : [ "string", "null" ]
+          },
+          "state" : {
+            "enum" : [ "backlog", "planned", "in_progress", "paused", "completed", "canceled" ],
             "type" : [ "string", "null" ]
           }
         },
@@ -533,70 +706,22 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
-    "/api/v1/admin/restructure" : {
+    "/api/v1/admin/move-tasks" : {
       "post" : {
-        "operationId" : "run",
+        "operationId" : "move",
         "responses" : {
           "200" : {
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/RestructureReport"
+                  "$ref" : "#/components/schemas/MoveReport"
                 }
               }
             },
             "description" : "OK"
           }
         },
-        "tags" : [ "restructure-controller" ]
-      }
-    },
-    "/api/v1/agenda" : {
-      "get" : {
-        "operationId" : "agenda",
-        "parameters" : [ {
-          "in" : "query",
-          "name" : "from",
-          "required" : true,
-          "schema" : {
-            "format" : "date",
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "to",
-          "required" : true,
-          "schema" : {
-            "format" : "date",
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "hide",
-          "required" : false,
-          "schema" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "items" : {
-                    "$ref" : "#/components/schemas/AgendaEntry"
-                  },
-                  "type" : "array"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "move-from-cal-dav" ]
       }
     },
     "/api/v1/calendars" : {
@@ -617,7 +742,7 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "calendar-controller" ]
       }
     },
     "/api/v1/calendars/{id}" : {
@@ -653,12 +778,48 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "calendar-controller" ]
       }
     },
     "/api/v1/events" : {
+      "get" : {
+        "operationId" : "occurrences",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "from",
+          "required" : true,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : true,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/EventOccurrence"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "calendar-controller" ]
+      },
       "post" : {
-        "operationId" : "createEvent",
+        "operationId" : "create_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -674,19 +835,19 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/AgendaEntry"
+                  "$ref" : "#/components/schemas/EventResponse"
                 }
               }
             },
             "description" : "Created"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "calendar-controller" ]
       }
     },
     "/api/v1/events/{id}" : {
       "delete" : {
-        "operationId" : "deleteEvent",
+        "operationId" : "delete_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -701,10 +862,34 @@
             "description" : "No Content"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "calendar-controller" ]
+      },
+      "get" : {
+        "operationId" : "event",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "calendar-controller" ]
       },
       "patch" : {
-        "operationId" : "moveEvent",
+        "operationId" : "update_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -717,7 +902,12 @@
           "content" : {
             "application/json" : {
               "schema" : {
-                "$ref" : "#/components/schemas/MoveEventRequest"
+                "$ref" : "#/components/schemas/JsonNode"
+              }
+            },
+            "application/merge-patch+json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JsonNode"
               }
             }
           },
@@ -728,14 +918,14 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/AgendaEntry"
+                  "$ref" : "#/components/schemas/EventResponse"
                 }
               }
             },
             "description" : "OK"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "calendar-controller" ]
       }
     },
     "/api/v1/ical/feed" : {
@@ -800,14 +990,89 @@
         "tags" : [ "feed-controller" ]
       }
     },
-    "/api/v1/quick-add/parse" : {
+    "/api/v1/labels" : {
+      "get" : {
+        "operationId" : "labels",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/LabelResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
       "post" : {
-        "operationId" : "parse",
+        "operationId" : "createLabel",
         "requestBody" : {
           "content" : {
             "application/json" : {
               "schema" : {
-                "$ref" : "#/components/schemas/QuickAddRequest"
+                "$ref" : "#/components/schemas/LabelRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LabelResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/labels/{id}" : {
+      "delete" : {
+        "operationId" : "deleteLabel",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "patch" : {
+        "operationId" : "updateLabel",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LabelRequest"
               }
             }
           },
@@ -818,14 +1083,142 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/QuickAddResult"
+                  "$ref" : "#/components/schemas/LabelResponse"
                 }
               }
             },
             "description" : "OK"
           }
         },
-        "tags" : [ "quick-add-controller" ]
+        "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/projects" : {
+      "get" : {
+        "operationId" : "projects",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/ProjectResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "post" : {
+        "operationId" : "createProject",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateProjectRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/projects/{id}" : {
+      "delete" : {
+        "operationId" : "deleteProject",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "get" : {
+        "operationId" : "project",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "patch" : {
+        "operationId" : "updateProject",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateProjectRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
       }
     },
     "/api/v1/sources" : {
@@ -883,28 +1276,6 @@
           "name" : "status",
           "required" : false,
           "schema" : {
-            "default" : "open",
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "calendarId",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "category",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "in" : "query",
-          "name" : "hide",
-          "required" : false,
-          "schema" : {
             "items" : {
               "type" : "string"
             },
@@ -912,9 +1283,42 @@
           }
         }, {
           "in" : "query",
+          "name" : "projectId",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "labelId",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
           "name" : "parentId",
           "required" : false,
           "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "dueFrom",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "dueTo",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
             "type" : "string"
           }
         }, {
@@ -940,10 +1344,10 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "task-controller" ]
       },
       "post" : {
-        "operationId" : "createTask",
+        "operationId" : "create",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -966,17 +1370,18 @@
             "description" : "Created"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "task-controller" ]
       }
     },
     "/api/v1/tasks/{id}" : {
       "delete" : {
-        "operationId" : "deleteTask",
+        "operationId" : "delete",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
           "required" : true,
           "schema" : {
+            "format" : "uuid",
             "type" : "string"
           }
         } ],
@@ -986,7 +1391,7 @@
             "description" : "No Content"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "task-controller" ]
       },
       "get" : {
         "operationId" : "task",
@@ -995,6 +1400,7 @@
           "name" : "id",
           "required" : true,
           "schema" : {
+            "format" : "uuid",
             "type" : "string"
           }
         } ],
@@ -1010,15 +1416,16 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "task-controller" ]
       },
       "patch" : {
-        "operationId" : "updateTask",
+        "operationId" : "update",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
           "required" : true,
           "schema" : {
+            "format" : "uuid",
             "type" : "string"
           }
         }, {
@@ -1056,7 +1463,79 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "workspace-controller" ]
+        "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/tasks/{id}/relations" : {
+      "post" : {
+        "operationId" : "relate",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateRelationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TaskResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/tasks/{id}/relations/{relationId}" : {
+      "delete" : {
+        "operationId" : "unrelate",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "relationId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TaskResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
       }
     }
   },

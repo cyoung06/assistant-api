@@ -5,7 +5,7 @@ import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.dav.IcsDocument
 import com.syeyoung.assistant.dav.Workspace
-import java.time.format.DateTimeFormatter
+import com.syeyoung.assistant.tasks.TaskExport
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -21,9 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import java.security.SecureRandom
 import java.time.Clock
-import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.util.Base64
 
 data class FeedInfo(
@@ -40,6 +38,7 @@ data class FeedInfo(
 class FeedService(
     private val db: DatabaseClient,
     private val ws: Workspace,
+    private val tasks: TaskExport,
     private val clock: Clock,
     private val props: AppProperties,
 ) {
@@ -55,9 +54,8 @@ class FeedService(
     }
 
     /**
-     * One iCalendar stream of everything, from every source: the stored events and to-dos as they
-     * are (repeats stay RRULEs, time zones included), plus a short "Due: …" event per open to-do,
-     * since calendar apps don't show VTODO in subscriptions.
+     * One iCalendar stream of everything: the calendar's events as stored (repeats stay RRULEs, time
+     * zones included), and the tasks as VTODO with a "Due: …" event each ([TaskExport]).
      */
     suspend fun calendar(token: String): String {
         val valid = db.sql("select 1 from feed_tokens where token = :t and revoked_at is null")
@@ -82,28 +80,11 @@ class FeedService(
             for (c in doc.root.children) {
                 when (c.name) {
                     "VTIMEZONE" -> if (timezones.add(c.value("TZID").orEmpty())) root.children += c
-                    "VEVENT", "VTODO" -> root.children += c
+                    "VEVENT" -> root.children += c
                 }
             }
         }
-        for (t in s.tasks.filter { !it.done && it.due != null }) {
-            val e = IcsDocument.Comp("VEVENT")
-            e.set("UID", "${t.uid}-due")
-            e.set("DTSTAMP", Workspace.utc(Instant.now(clock)))
-            val due = t.due!!
-            if (due.time == null) {
-                e.set("DTSTART", due.date.format(DateTimeFormatter.BASIC_ISO_DATE), mapOf("VALUE" to "DATE"))
-                e.set("DTEND", due.date.plusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE), mapOf("VALUE" to "DATE"))
-            } else {
-                val at = due.date.atTime(due.time).atZone(props.zone).toInstant()
-                e.set("DTSTART", Workspace.utc(at))
-                e.set("DTEND", Workspace.utc(at.plus(DEADLINE_LENGTH)))
-            }
-            e.setText("SUMMARY", "Due: ${t.title}")
-            t.url?.let { e.set("URL", it) }
-            e.set("RELATED-TO", t.uid)
-            root.children += e
-        }
+        root.children += tasks.components()
         return IcsDocument(root).serialize()
     }
 
@@ -121,10 +102,6 @@ class FeedService(
     }
 
     private fun pathFor(token: String) = "/api/v1/ical/$token.ics"
-
-    private companion object {
-        val DEADLINE_LENGTH: Duration = Duration.ofMinutes(15)
-    }
 }
 
 @RestController

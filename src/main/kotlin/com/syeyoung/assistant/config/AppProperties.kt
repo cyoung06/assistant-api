@@ -7,7 +7,6 @@ import java.time.ZoneId
 @ConfigurationProperties("app")
 data class AppProperties(
     val zone: ZoneId = ZoneId.of("Asia/Seoul"),
-    val llm: Llm = Llm(),
     val sources: Sources = Sources(),
     val dav: Dav = Dav(),
 ) {
@@ -46,11 +45,4 @@ data class AppProperties(
             val lookahead: Duration = Duration.ofDays(200),
         )
     }
-
-    data class Llm(
-        val baseUrl: String = "https://api.openai.com",
-        val apiKey: String = "",
-        val model: String = "gpt-6-luna",
-        val timeout: Duration = Duration.ofSeconds(5),
-    )
 }

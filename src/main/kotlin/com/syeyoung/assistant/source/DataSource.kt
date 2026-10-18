@@ -7,8 +7,9 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 /**
- * A plugin that pulls items from an external system. Plugins only fetch; [SourceSync] turns what
- * they return into items, so every source follows the same ownership rules.
+ * A plugin that pulls things from an external system. Plugins only fetch; [SourceSync] turns what
+ * they return into tasks (records with a deadline) and events (records with a time), so every
+ * source follows the same ownership rules.
  */
 interface DataSource {
     val type: SourceType
@@ -50,13 +51,15 @@ data class SourceRecord(
     val atEndDate: LocalDate? = null,
     val notes: String? = null,
     val url: String? = null,
-    /** Categories to attach when the item is created (e.g. the course, "assignment"). */
+    /** Labels for a task, categories for an event, set when it's created (e.g. "assignment"). */
     val tags: List<SourceTag> = emptyList(),
+    /** The project a task belongs to (e.g. its course). */
+    val project: SourceTag? = null,
     /** Which of the source's calendars it goes in; null for the source's single calendar. */
     val calendar: SourceTag? = null,
 )
 
-/** A category or calendar the source wants, identified by the source's own key (e.g. a course ID). */
+/** A label, project or calendar the source wants, identified by the source's own key (e.g. a course ID). */
 data class SourceTag(val key: String, val name: String)
 
 data class SyncReport(
@@ -67,4 +70,8 @@ data class SyncReport(
     /** Records whose item was deleted in the app; they are not recreated. */
     val skippedDeleted: Int = 0,
     val deleted: Int = 0,
-)
+) {
+    operator fun plus(o: SyncReport) = SyncReport(
+        created + o.created, updated + o.updated, completed + o.completed, unchanged + o.unchanged, skippedDeleted + o.skippedDeleted, deleted + o.deleted,
+    )
+}
