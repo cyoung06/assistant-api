@@ -51,6 +51,8 @@ management:
         enabled: true
 
 springdoc:
+  # Responses are JSON (not */*), so generated clients decode them.
+  default-produces-media-type: application/json
   api-docs:
     path: /v3/api-docs
   swagger-ui:
