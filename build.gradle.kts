@@ -41,7 +41,8 @@ dependencies {
     implementation("ai.koog:http-client-spring-webclient:$koogVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json")
 
-    runtimeOnly("org.postgresql:r2dbc-postgresql")
+    // Compile scope for its jsonb type (io.r2dbc.postgresql.codec.Json).
+    implementation("org.postgresql:r2dbc-postgresql")
     // Flyway runs migrations over JDBC.
     runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")

@@ -447,6 +447,72 @@
         "required" : [ "type" ],
         "type" : "object"
       },
+      "SourceStatus" : {
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "intervalMinutes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "lastError" : {
+            "type" : [ "string", "null" ]
+          },
+          "lastReport" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/SyncReport"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "lastSuccessAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "lastSyncAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "syncing" : {
+            "type" : "boolean"
+          },
+          "type" : {
+            "enum" : [ "manual", "plms", "email", "upload" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "displayName", "enabled", "intervalMinutes", "syncing", "type" ],
+        "type" : "object"
+      },
+      "SyncReport" : {
+        "properties" : {
+          "completed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "created" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedDeleted" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "unchanged" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "updated" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "TagResponse" : {
         "properties" : {
           "color" : {
@@ -900,6 +966,53 @@
           }
         },
         "tags" : [ "quick-add-controller" ]
+      }
+    },
+    "/api/v1/sources" : {
+      "get" : {
+        "operationId" : "list_2",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/SourceStatus"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "source-controller" ]
+      }
+    },
+    "/api/v1/sources/{type}/sync" : {
+      "post" : {
+        "operationId" : "syncNow",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "type",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SourceStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "source-controller" ]
       }
     },
     "/api/v1/tags" : {

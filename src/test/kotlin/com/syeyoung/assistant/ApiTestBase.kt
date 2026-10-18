@@ -55,9 +55,12 @@ class TestInfra {
     @Bean
     @Primary
     fun fakeExtractor() = FakeExtractor()
+
+    @Bean
+    fun fakeSource() = FakeSource()
 }
 
-@SpringBootTest
+@SpringBootTest(properties = ["app.sources.scheduler-enabled=false"])
 @Import(TestInfra::class)
 abstract class ApiTestBase {
     @Autowired lateinit var context: ApplicationContext
@@ -83,7 +86,7 @@ abstract class ApiTestBase {
 
     @BeforeEach
     fun setUp() {
-        runBlocking { db.sql("truncate items, tags").await() }
+        runBlocking { db.sql("truncate items, tags, sources, source_tags").await() }
         client = WebTestClient.bindToApplicationContext(context).build()
     }
 

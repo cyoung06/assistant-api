@@ -15,6 +15,12 @@ spring:
 
 app:
   zone: Asia/Seoul
+  sources:
+    scheduler-enabled: ${SOURCES_SCHEDULER_ENABLED:true}
+    plms:
+      enabled: ${PLMS_ENABLED:false}
+      username: ${PLMS_USERNAME:}
+      password: ${PLMS_PASSWORD:}
   llm:
     base-url: ${LLM_BASE_URL:https://api.openai.com}
     api-key: ${LLM_API_KEY:}
