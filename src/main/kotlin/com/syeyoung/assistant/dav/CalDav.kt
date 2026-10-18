@@ -49,7 +49,7 @@ class HttpCalDav(props: AppProperties) : CalDav {
     private val base = config.url.trimEnd('/')
     private val home = "/${config.username}/"
     private val auth = "Basic " + Base64.getEncoder().encodeToString("${config.username}:${config.password}".toByteArray())
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+    private val http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(10)).build()
 
     override suspend fun collections(): List<DavCollection> {
         val body = """<?xml version="1.0" encoding="utf-8"?>
@@ -113,7 +113,9 @@ class HttpCalDav(props: AppProperties) : CalDav {
 
     override suspend fun put(href: String, data: String, etag: String?): String? {
         val headers = mapOf("Content-Type" to "text/calendar; charset=utf-8") + (if (etag == null) mapOf("If-None-Match" to "*") else mapOf("If-Match" to etag))
-        val response = request("PUT", href, data, headers)
+        val (response, retried) = requestWithRetry("PUT", href, data, headers)
+        // A retried create can find its own first attempt already stored.
+        if (response.statusCode() == 412 && retried && etag == null && get(href)?.data?.let(::sameUid)?.invoke(data) == true) return null
         if (response.statusCode() == 412) throw DavConflictException(href)
         check(response.statusCode() in 200..299) { "PUT $href: HTTP ${response.statusCode()} ${response.body().take(200)}" }
         return response.headers().firstValue("ETag").orElse(null)
@@ -131,7 +133,26 @@ class HttpCalDav(props: AppProperties) : CalDav {
         return response.body()
     }
 
-    private suspend fun request(method: String, href: String, body: String?, headers: Map<String, String>): HttpResponse<String> {
+    /**
+     * Sends the request, retrying once when the connection fails before a response arrives: the server
+     * closes idle keep-alive connections, and the client may pick one that was just closed.
+     */
+    private suspend fun requestWithRetry(method: String, href: String, body: String?, headers: Map<String, String>): Pair<HttpResponse<String>, Boolean> =
+        try {
+            sendOnce(method, href, body, headers) to false
+        } catch (e: java.io.IOException) {
+            sendOnce(method, href, body, headers) to true
+        }
+
+    private suspend fun request(method: String, href: String, body: String?, headers: Map<String, String>): HttpResponse<String> =
+        requestWithRetry(method, href, body, headers).first
+
+    private fun sameUid(stored: String): (String) -> Boolean = { sent ->
+        val uid = { text: String -> Regex("(?m)^UID:(.*)$").find(text.replace("\r", ""))?.groupValues?.get(1)?.trim() }
+        uid(stored) != null && uid(stored) == uid(sent)
+    }
+
+    private suspend fun sendOnce(method: String, href: String, body: String?, headers: Map<String, String>): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI(base + href))
             .timeout(Duration.ofSeconds(30))
             .header("Authorization", auth)
