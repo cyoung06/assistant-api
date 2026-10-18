@@ -856,10 +856,14 @@
           }
         }, {
           "in" : "query",
-          "name" : "repeating",
+          "name" : "hideTags",
           "required" : false,
           "schema" : {
-            "type" : "boolean"
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
           }
         }, {
           "in" : "query",

@@ -36,8 +36,8 @@ data class ItemFilter(
     val scheduled: Boolean? = null,
     /** Only items whose deadline has passed and that are not done. */
     val overdueOnly: Boolean = false,
-    /** True: only occurrences of repeating events. False: leave them out. */
-    val repeating: Boolean? = null,
+    /** Leave out items carrying any of these tags. */
+    val hideTagIds: Set<UUID> = emptySet(),
     val query: String? = null,
 )
 
@@ -79,11 +79,7 @@ class ItemRepository(private val db: DatabaseClient) {
             null -> {}
         }
         if (filter.overdueOnly) where += "done_at is null and by_date is not null and $DEADLINE_SQL <= :now"
-        when (filter.repeating) {
-            true -> where += "series_id is not null"
-            false -> where += "series_id is null"
-            null -> {}
-        }
+        if (filter.hideTagIds.isNotEmpty()) where += "not (tag_ids && :hideTagIds)"
         filter.query?.let { where += "(title ilike :q or notes ilike :q)" }
         after?.let { where += "(created_at, id) < (:afterCreatedAt, :afterId)" }
 
@@ -93,6 +89,7 @@ class ItemRepository(private val db: DatabaseClient) {
         filter.tagId?.let { spec = spec.bind("tagId", it) }
         filter.parentId?.let { spec = spec.bind("parentId", it) }
         if (filter.overdueOnly) spec = spec.bind("now", now).bind("zone", zone.id)
+        if (filter.hideTagIds.isNotEmpty()) spec = spec.bind("hideTagIds", filter.hideTagIds.toTypedArray())
         filter.query?.let { spec = spec.bind("q", "%${escapeLike(it)}%") }
         after?.let { spec = spec.bind("afterCreatedAt", it.createdAt).bind("afterId", it.id) }
         return spec.map(::toItem).flow().toList()

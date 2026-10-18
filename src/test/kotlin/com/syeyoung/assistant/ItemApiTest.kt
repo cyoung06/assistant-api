@@ -149,4 +149,14 @@ class ItemApiTest : ApiTestBase() {
     }
 
     private fun timed(start: String, end: String) = mapOf("start" to start, "end" to end)
+
+    @Test
+    fun `lists can hide items with given tags`() {
+        val cls = tag("class", "#6B7280")
+        post("/api/v1/items", mapOf("title" to "Lecture", "tagIds" to listOf(cls)))
+        post("/api/v1/items", mapOf("title" to "HW", "by" to mapOf("date" to "2026-10-23")))
+        @Suppress("UNCHECKED_CAST")
+        val shown = get("/api/v1/items?hideTags=$cls")["items"] as List<Map<String, Any?>>
+        assertThat(shown.map { it["title"] }).containsExactly("HW")
+    }
 }

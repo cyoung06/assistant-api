@@ -157,16 +157,4 @@ class SeriesTest : ApiTestBase() {
         // Test clock: 2026-10-18; horizon 120 days.
         assertThat(dates.last()).isEqualTo("2027-02-15")
     }
-
-    @Test
-    fun `lists can leave repeating events out`() {
-        createClass()
-        post("/api/v1/items", mapOf("title" to "HW", "by" to mapOf("date" to "2026-10-23")))
-        @Suppress("UNCHECKED_CAST")
-        val oneOff = get("/api/v1/items?repeating=false")["items"] as List<Map<String, Any?>>
-        assertThat(oneOff.map { it["title"] }).containsExactly("HW")
-        @Suppress("UNCHECKED_CAST")
-        val repeating = get("/api/v1/items?repeating=true&limit=200")["items"] as List<Map<String, Any?>>
-        assertThat(repeating).hasSize(18)
-    }
 }
