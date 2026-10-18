@@ -2,6 +2,7 @@ package com.syeyoung.assistant.item
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonValue
+import com.syeyoung.assistant.series.RepeatRule
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -34,6 +35,12 @@ data class ItemFields(
     val sourceType: SourceType = SourceType.MANUAL,
     val sourceRef: String? = null,
     val sourceUrl: String? = null,
+    /** Set on occurrences of a repeating event. */
+    val seriesId: UUID? = null,
+    /** The date this occurrence was generated for; unchanged when the occurrence is moved. */
+    val occurrenceDate: LocalDate? = null,
+    /** Changed on its own, so edits to the whole series leave it alone. */
+    val detached: Boolean = false,
 ) {
     val hasTimedAt get() = atStart != null
     val hasAllDayAt get() = atStartDate != null
@@ -69,6 +76,8 @@ data class At(
 
 data class Source(val type: SourceType, val ref: String?, val url: String?)
 
+data class SeriesRef(val id: UUID, val occurrenceDate: LocalDate, val detached: Boolean)
+
 data class Derived(
     /** Has a deadline that has passed and is not done. */
     val overdue: Boolean,
@@ -97,6 +106,8 @@ data class ItemResponse(
     val tagIds: List<UUID>,
     val doneAt: Instant?,
     val source: Source,
+    /** Set when this item is one occurrence of a repeating event. */
+    val series: SeriesRef?,
     val version: Long,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -117,6 +128,8 @@ data class CreateItemRequest(
     val tagIds: List<UUID> = emptyList(),
     val doneAt: Instant? = null,
     val source: CreateSource? = null,
+    /** Makes the new item the first occurrence of a repeating event. Needs `at` and no `by`. */
+    val repeat: RepeatRule? = null,
 )
 
 data class CreateSource(val type: SourceType, val ref: String? = null, val url: String? = null)

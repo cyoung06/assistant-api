@@ -9,7 +9,14 @@ data class AppProperties(
     val zone: ZoneId = ZoneId.of("Asia/Seoul"),
     val llm: Llm = Llm(),
     val sources: Sources = Sources(),
+    val series: SeriesSettings = SeriesSettings(),
 ) {
+    data class SeriesSettings(
+        /** Extends repeating events as days pass (at startup and every [extendEvery]). */
+        val schedulerEnabled: Boolean = true,
+        val extendEvery: Duration = Duration.ofHours(6),
+    )
+
     data class Sources(
         val schedulerEnabled: Boolean = true,
         val initialDelay: Duration = Duration.ofSeconds(30),

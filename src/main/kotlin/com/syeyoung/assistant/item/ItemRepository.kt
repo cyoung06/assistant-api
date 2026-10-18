@@ -134,9 +134,11 @@ class ItemRepository(private val db: DatabaseClient) {
             db.sql(
                 """
                 insert into items (id, title, notes, by_date, by_time, at_start, at_end, at_start_date, at_end_date,
-                    parent_id, main_tag_id, tag_ids, done_at, source_type, source_ref, source_url, created_at, updated_at)
+                    parent_id, main_tag_id, tag_ids, done_at, source_type, source_ref, source_url,
+                    series_id, occurrence_date, detached, created_at, updated_at)
                 values (:id, :title, :notes, :byDate, :byTime, :atStart, :atEnd, :atStartDate, :atEndDate,
-                    :parentId, :mainTagId, :tagIds, :doneAt, :sourceType, :sourceRef, :sourceUrl, :now, :now)
+                    :parentId, :mainTagId, :tagIds, :doneAt, :sourceType, :sourceRef, :sourceUrl,
+                    :seriesId, :occurrenceDate, :detached, :now, :now)
                 returning *
                 """,
             ).bind("id", id).bind("now", now),
@@ -151,6 +153,7 @@ class ItemRepository(private val db: DatabaseClient) {
                     at_start = :atStart, at_end = :atEnd, at_start_date = :atStartDate, at_end_date = :atEndDate,
                     parent_id = :parentId, main_tag_id = :mainTagId, tag_ids = :tagIds, done_at = :doneAt,
                     source_type = :sourceType, source_ref = :sourceRef, source_url = :sourceUrl,
+                    series_id = :seriesId, occurrence_date = :occurrenceDate, detached = :detached,
                     updated_at = :now, version = version + 1, seq = nextval('change_seq')
                 where id = :id
                 returning *
@@ -278,6 +281,9 @@ class ItemRepository(private val db: DatabaseClient) {
         .bind("sourceType", f.sourceType.wire)
         .bindNullable("sourceRef", f.sourceRef, String::class.java)
         .bindNullable("sourceUrl", f.sourceUrl, String::class.java)
+        .bindNullable("seriesId", f.seriesId, UUID::class.java)
+        .bindNullable("occurrenceDate", f.occurrenceDate, LocalDate::class.java)
+        .bind("detached", f.detached)
 
     companion object {
         /** The instant a deadline passes in zone `:zone`. Date-only deadlines pass at the start of the next day. */
@@ -303,6 +309,9 @@ class ItemRepository(private val db: DatabaseClient) {
                 sourceType = SourceType.fromWire(r.req("source_type")),
                 sourceRef = r.opt("source_ref"),
                 sourceUrl = r.opt("source_url"),
+                seriesId = r.opt("series_id"),
+                occurrenceDate = r.opt("occurrence_date"),
+                detached = r.req("detached"),
             ),
             version = r.req("version"),
             seq = r.req("seq"),

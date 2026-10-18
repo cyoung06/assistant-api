@@ -60,7 +60,7 @@ class TestInfra {
     fun fakeSource() = FakeSource()
 }
 
-@SpringBootTest(properties = ["app.sources.scheduler-enabled=false"])
+@SpringBootTest(properties = ["app.sources.scheduler-enabled=false", "app.series.scheduler-enabled=false"])
 @Import(TestInfra::class)
 abstract class ApiTestBase {
     @Autowired lateinit var context: ApplicationContext
@@ -86,7 +86,7 @@ abstract class ApiTestBase {
 
     @BeforeEach
     fun setUp() {
-        runBlocking { db.sql("truncate items, tags, sources, source_tags").await() }
+        runBlocking { db.sql("truncate items, series, tags, sources, source_tags").await() }
         client = WebTestClient.bindToApplicationContext(context).build()
     }
 

@@ -5,6 +5,9 @@ import com.syeyoung.assistant.common.NotFoundException
 import com.syeyoung.assistant.common.ValidationException
 import com.syeyoung.assistant.common.VersionMismatchException
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.series.RepeatRule
+import com.syeyoung.assistant.series.Scope
+import com.syeyoung.assistant.series.SeriesService
 import com.syeyoung.assistant.tag.TagRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -18,6 +21,7 @@ import java.util.UUID
 class ItemService(
     private val items: ItemRepository,
     private val tags: TagRepository,
+    private val series: SeriesService,
     private val input: ItemInput,
     private val views: ItemViews,
     private val clock: Clock,
@@ -44,16 +48,25 @@ class ItemService(
         val id = req.id ?: UUID.randomUUID()
         if (items.exists(id)) throw ConflictException("id_exists", "Item $id already exists")
         val fields = validate(input.fromCreate(req), self = null)
-        return views.render(items.insert(id, fields, Instant.now(clock)))
+        val item = items.insert(id, fields, Instant.now(clock))
+        return views.render(req.repeat?.let { series.start(item, it) } ?: item)
+    }
+
+    /** Makes an existing item repeat; it becomes the first occurrence. */
+    @Transactional
+    suspend fun repeat(id: UUID, rule: RepeatRule): ItemResponse {
+        val current = items.find(id, forUpdate = true) ?: throw NotFoundException("Item", id)
+        return views.render(series.start(current, rule))
     }
 
     @Transactional
-    suspend fun update(id: UUID, patch: JsonNode, expectedVersion: Long?): ItemResponse {
+    suspend fun update(id: UUID, patch: JsonNode, expectedVersion: Long?, scope: Scope = Scope.THIS): ItemResponse {
         val current = items.find(id, forUpdate = true) ?: throw NotFoundException("Item", id)
         if (expectedVersion != null && expectedVersion != current.version) throw VersionMismatchException(current.version)
         val fields = validate(input.applyPatch(current.fields, patch), self = id)
         val now = Instant.now(clock)
-        val updated = items.update(id, fields, now)
+        // Occurrences of a repeating event go through the series, which knows what the scope reaches.
+        val updated = if (current.fields.seriesId != null) series.edit(current, fields, scope) else items.update(id, fields, now)
         // Completing an item completes everything under it. Un-completing affects only the item itself.
         if (current.fields.doneAt == null && fields.doneAt != null) {
             items.completeDescendants(id, fields.doneAt, now)
@@ -63,10 +76,10 @@ class ItemService(
 
     /** Soft-deletes the item and all its descendants. Undo with [restore]. */
     @Transactional
-    suspend fun delete(id: UUID, expectedVersion: Long?) {
+    suspend fun delete(id: UUID, expectedVersion: Long?, scope: Scope = Scope.THIS) {
         val current = items.find(id, forUpdate = true) ?: throw NotFoundException("Item", id)
         if (expectedVersion != null && expectedVersion != current.version) throw VersionMismatchException(current.version)
-        items.softDeleteTree(id, Instant.now(clock))
+        if (current.fields.seriesId != null) series.delete(current, scope) else items.softDeleteTree(id, Instant.now(clock))
     }
 
     /** Restores a deleted item together with the descendants that were deleted with it. */

@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import com.syeyoung.assistant.series.RepeatRule
+import com.syeyoung.assistant.series.Scope
 import tools.jackson.databind.JsonNode
 import java.util.UUID
 
@@ -65,21 +67,35 @@ class ItemController(private val service: ItemService) {
                 .body(it)
         }
 
-    /** JSON merge patch. Send `If-Match: "<version>"` to reject the write if someone else changed the item. */
+    /**
+     * JSON merge patch. Send `If-Match: "<version>"` to reject the write if someone else changed the item.
+     * For an occurrence of a repeating event, `scope` says which occurrences get the new title, tags
+     * and time of day: `this` (default), `following` or `all`.
+     */
     @PatchMapping("/{id}", consumes = ["application/json", "application/merge-patch+json"])
     suspend fun update(
         @PathVariable id: UUID,
         @RequestBody patch: JsonNode,
         @RequestHeader("If-Match", required = false) ifMatch: String?,
+        @RequestParam(required = false) scope: String?,
     ): ResponseEntity<ItemResponse> =
-        service.update(id, patch, parseIfMatch(ifMatch)).let { withETag(it.version, it) }
+        service.update(id, patch, parseIfMatch(ifMatch), Scope.fromWire(scope)).let { withETag(it.version, it) }
 
-    /** Deletes the item and everything under it. */
+    /** Deletes the item and everything under it. For a repeating event, `scope` as for PATCH. */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun delete(@PathVariable id: UUID, @RequestHeader("If-Match", required = false) ifMatch: String?) {
-        service.delete(id, parseIfMatch(ifMatch))
+    suspend fun delete(
+        @PathVariable id: UUID,
+        @RequestHeader("If-Match", required = false) ifMatch: String?,
+        @RequestParam(required = false) scope: String?,
+    ) {
+        service.delete(id, parseIfMatch(ifMatch), Scope.fromWire(scope))
     }
+
+    /** Makes the item repeat; it becomes the first occurrence. It needs `at` and no `by`. */
+    @PostMapping("/{id}/repeat")
+    suspend fun repeat(@PathVariable id: UUID, @RequestBody rule: RepeatRule): ResponseEntity<ItemResponse> =
+        service.repeat(id, rule).let { withETag(it.version, it) }
 
     /** Undoes a delete. */
     @PostMapping("/{id}/restore")

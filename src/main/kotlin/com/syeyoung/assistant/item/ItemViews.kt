@@ -78,6 +78,7 @@ fun Item.toResponse(zone: ZoneId, derived: Derived) = ItemResponse(
     tagIds = fields.tagIds,
     doneAt = fields.doneAt,
     source = Source(fields.sourceType, fields.sourceRef, fields.sourceUrl),
+    series = fields.seriesId?.let { SeriesRef(it, fields.occurrenceDate!!, fields.detached) },
     version = version,
     createdAt = createdAt,
     updatedAt = updatedAt,

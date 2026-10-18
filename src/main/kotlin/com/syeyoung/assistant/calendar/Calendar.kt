@@ -33,6 +33,8 @@ enum class EntryKind(@get:JsonValue val wire: String) {
 data class CalendarEntry(
     val itemId: UUID,
     val parentId: UUID?,
+    /** Set for occurrences of a repeating event. */
+    val seriesId: UUID?,
     val kind: EntryKind,
     val title: String,
     val color: String?,
@@ -97,6 +99,7 @@ class CalendarService(
         val base = CalendarEntry(
             itemId = item.id,
             parentId = f.parentId,
+            seriesId = f.seriesId,
             kind = EntryKind.BLOCK,
             title = title,
             color = color,

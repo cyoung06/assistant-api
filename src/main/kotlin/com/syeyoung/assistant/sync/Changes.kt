@@ -5,6 +5,9 @@ import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.item.ItemRepository
 import com.syeyoung.assistant.item.ItemResponse
 import com.syeyoung.assistant.item.ItemViews
+import com.syeyoung.assistant.series.SeriesRepository
+import com.syeyoung.assistant.series.SeriesResponse
+import com.syeyoung.assistant.series.toResponse
 import com.syeyoung.assistant.tag.TagRepository
 import com.syeyoung.assistant.tag.TagResponse
 import com.syeyoung.assistant.tag.toResponse
@@ -22,6 +25,8 @@ data class ChangesPage(
     /** Changed items, including deleted ones (with `deletedAt` set). */
     val items: List<ItemResponse>,
     val tags: List<TagResponse>,
+    /** Changed repeating-event series, including deleted ones. */
+    val series: List<SeriesResponse>,
     /** Pass as `since` on the next call. */
     val cursor: Long,
     val hasMore: Boolean,
@@ -41,6 +46,7 @@ class ChangesService(
     private val items: ItemRepository,
     private val tags: TagRepository,
     private val views: ItemViews,
+    private val seriesRepo: SeriesRepository,
 ) {
     suspend fun since(since: Long, limit: Int): ChangesPage {
         if (since < 0) throw ValidationException("since must be >= 0")
@@ -51,6 +57,8 @@ class ChangesService(
             select seq, 'item' as kind, id from items where seq > :since
             union all
             select seq, 'tag' as kind, id from tags where seq > :since
+            union all
+            select seq, 'series' as kind, id from series where seq > :since
             order by seq
             limit :limit
             """,
@@ -61,9 +69,11 @@ class ChangesService(
         val page = changed.take(limit)
         val itemIds = page.filter { it.second == "item" }.map { it.third }
         val tagIds = page.filter { it.second == "tag" }.map { it.third }
+        val seriesIds = page.filter { it.second == "series" }.map { it.third }
         return ChangesPage(
             items = views.render(items.findAllIncludingDeleted(itemIds).sortedBy { it.seq }),
             tags = tags.findAllIncludingDeleted(tagIds).sortedBy { it.seq }.map { it.toResponse() },
+            series = seriesRepo.findAllIncludingDeleted(seriesIds).sortedBy { it.seq }.map { it.toResponse() },
             cursor = page.lastOrNull()?.first ?: since,
             hasMore = changed.size > limit,
         )

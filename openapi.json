@@ -78,6 +78,10 @@
             "format" : "uuid",
             "type" : [ "string", "null" ]
           },
+          "seriesId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
           "session" : {
             "type" : "boolean"
           },
@@ -111,6 +115,12 @@
             },
             "type" : "array"
           },
+          "series" : {
+            "items" : {
+              "$ref" : "#/components/schemas/SeriesResponse"
+            },
+            "type" : "array"
+          },
           "tags" : {
             "items" : {
               "$ref" : "#/components/schemas/TagResponse"
@@ -118,7 +128,7 @@
             "type" : "array"
           }
         },
-        "required" : [ "cursor", "hasMore", "items", "tags" ],
+        "required" : [ "cursor", "hasMore", "items", "series", "tags" ],
         "type" : "object"
       },
       "CreateItemRequest" : {
@@ -155,6 +165,13 @@
           "parentId" : {
             "format" : "uuid",
             "type" : [ "string", "null" ]
+          },
+          "repeat" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/RepeatRule"
+            }, {
+              "type" : "null"
+            } ]
           },
           "source" : {
             "oneOf" : [ {
@@ -300,6 +317,13 @@
             "format" : "uuid",
             "type" : [ "string", "null" ]
           },
+          "series" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/SeriesRef"
+            }, {
+              "type" : "null"
+            } ]
+          },
           "source" : {
             "$ref" : "#/components/schemas/Source"
           },
@@ -429,6 +453,118 @@
           }
         },
         "required" : [ "draft", "parsed", "unknownTags" ],
+        "type" : "object"
+      },
+      "RepeatRule" : {
+        "properties" : {
+          "count" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "freq" : {
+            "enum" : [ "daily", "weekly", "monthly" ],
+            "type" : "string"
+          },
+          "interval" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "until" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "weekdays" : {
+            "items" : {
+              "enum" : [ "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY" ],
+              "type" : "string"
+            },
+            "type" : "array",
+            "uniqueItems" : true
+          }
+        },
+        "required" : [ "freq" ],
+        "type" : "object"
+      },
+      "SeriesRef" : {
+        "properties" : {
+          "detached" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "occurrenceDate" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "required" : [ "detached", "id", "occurrenceDate" ],
+        "type" : "object"
+      },
+      "SeriesResponse" : {
+        "properties" : {
+          "allDay" : {
+            "type" : "boolean"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deletedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "durationMinutes" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "mainTagId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "notes" : {
+            "type" : "string"
+          },
+          "repeat" : {
+            "$ref" : "#/components/schemas/RepeatRule"
+          },
+          "spanDays" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "startDate" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "startTime" : {
+            "format" : "time-local",
+            "type" : [ "string", "null" ]
+          },
+          "tagIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "allDay", "createdAt", "id", "notes", "repeat", "startDate", "tagIds", "title", "updatedAt", "version" ],
         "type" : "object"
       },
       "Source" : {
@@ -801,6 +937,13 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "in" : "query",
+          "name" : "scope",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "204" : {
@@ -848,6 +991,13 @@
         }, {
           "in" : "header",
           "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "scope",
           "required" : false,
           "schema" : {
             "type" : "string"
@@ -913,6 +1063,43 @@
         "tags" : [ "item-controller" ]
       }
     },
+    "/api/v1/items/{id}/repeat" : {
+      "post" : {
+        "operationId" : "repeat",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RepeatRule"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      }
+    },
     "/api/v1/items/{id}/restore" : {
       "post" : {
         "operationId" : "restore",
@@ -966,6 +1153,77 @@
           }
         },
         "tags" : [ "quick-add-controller" ]
+      }
+    },
+    "/api/v1/series/{id}" : {
+      "get" : {
+        "operationId" : "get_2",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SeriesResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "series-controller" ]
+      }
+    },
+    "/api/v1/series/{id}/repeat" : {
+      "put" : {
+        "operationId" : "changeRule",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RepeatRule"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SeriesResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "series-controller" ]
       }
     },
     "/api/v1/sources" : {
