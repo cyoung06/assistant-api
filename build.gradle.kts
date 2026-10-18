@@ -51,7 +51,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-security-test")
     // A real Postgres process for tests, no Docker needed.
     testImplementation("io.zonky.test:embedded-postgres:2.2.2")
-    testImplementation(enforcedPlatform("io.zonky.test.postgres:embedded-postgres-binaries-bom:17.11.0"))
+    testImplementation(enforcedPlatform("io.zonky.test.postgres:embedded-postgres-binaries-bom:16.15.0"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -61,6 +61,11 @@ kotlin {
         jvmTarget = JvmTarget.JVM_21
         freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
     }
+}
+
+// Only the executable jar; the plain one would just confuse the Docker build.
+tasks.jar {
+    enabled = false
 }
 
 tasks.withType<Test> {

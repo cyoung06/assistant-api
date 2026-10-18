@@ -1,0 +1,8 @@
+.gradle
+.kotlin
+build
+.devdb
+.idea
+src/test
+openapi.json
+*.md

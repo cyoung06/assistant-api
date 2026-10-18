@@ -1,1 +1,1044 @@
-{"openapi":"3.1.0","info":{"title":"OpenAPI definition","version":"v0"},"servers":[{"url":"","description":"Generated server url"}],"paths":{"/api/v1/tags":{"get":{"tags":["tag-controller"],"operationId":"list","responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/TagResponse"}}}}}}},"post":{"tags":["tag-controller"],"operationId":"create","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreateTagRequest"}}},"required":true},"responses":{"201":{"description":"Created","content":{"*/*":{"schema":{"$ref":"#/components/schemas/TagResponse"}}}}}}},"/api/v1/quick-add/parse":{"post":{"tags":["quick-add-controller"],"operationId":"parse","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/QuickAddRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/QuickAddResult"}}}}}}},"/api/v1/items":{"get":{"tags":["item-controller"],"operationId":"list_1","parameters":[{"name":"tag","in":"query","required":false,"schema":{"type":"string","format":"uuid"}},{"name":"parentId","in":"query","required":false,"schema":{"type":"string","format":"uuid"}},{"name":"topLevel","in":"query","required":false,"schema":{"type":"boolean","default":false}},{"name":"done","in":"query","required":false,"schema":{"type":"boolean"}},{"name":"scheduled","in":"query","required":false,"schema":{"type":"boolean"}},{"name":"overdue","in":"query","required":false,"schema":{"type":"boolean","default":false}},{"name":"q","in":"query","required":false,"schema":{"type":"string"}},{"name":"cursor","in":"query","required":false,"schema":{"type":"string"}},{"name":"limit","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":50}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ItemPage"}}}}}},"post":{"tags":["item-controller"],"operationId":"create_1","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreateItemRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ItemResponse"}}}}}}},"/api/v1/items/{id}/restore":{"post":{"tags":["item-controller"],"operationId":"restore","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ItemResponse"}}}}}}},"/api/v1/tags/{id}":{"get":{"tags":["tag-controller"],"operationId":"get","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/TagResponse"}}}}}},"delete":{"tags":["tag-controller"],"operationId":"delete","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"If-Match","in":"header","required":false,"schema":{"type":"string"}}],"responses":{"204":{"description":"No Content","content":{}}}},"patch":{"tags":["tag-controller"],"operationId":"update","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"If-Match","in":"header","required":false,"schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdateTagRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/TagResponse"}}}}}}},"/api/v1/items/{id}":{"get":{"tags":["item-controller"],"operationId":"get_1","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ItemResponse"}}}}}},"delete":{"tags":["item-controller"],"operationId":"delete_1","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"If-Match","in":"header","required":false,"schema":{"type":"string"}}],"responses":{"204":{"description":"No Content","content":{}}}},"patch":{"tags":["item-controller"],"operationId":"update_1","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"If-Match","in":"header","required":false,"schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/JsonNode"}},"application/merge-patch+json":{"schema":{"$ref":"#/components/schemas/JsonNode"}}},"required":true},"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ItemResponse"}}}}}}},"/api/v1/items/{id}/descendants":{"get":{"tags":["item-controller"],"operationId":"descendants","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/ItemResponse"}}}}}}}},"/api/v1/changes":{"get":{"tags":["changes-controller"],"operationId":"changes","parameters":[{"name":"since","in":"query","required":false,"schema":{"type":"integer","format":"int64","default":0}},{"name":"limit","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":500}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ChangesPage"}}}}}}},"/api/v1/calendar":{"get":{"tags":["calendar-controller"],"operationId":"entries","parameters":[{"name":"from","in":"query","required":true,"schema":{"type":"string","format":"date"}},{"name":"to","in":"query","required":true,"schema":{"type":"string","format":"date"}},{"name":"tags","in":"query","required":false,"schema":{"type":"array","items":{"type":"string","format":"uuid"}}},{"name":"hideTags","in":"query","required":false,"schema":{"type":"array","items":{"type":"string","format":"uuid"}}},{"name":"sessions","in":"query","required":false,"schema":{"type":"boolean","default":true}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/CalendarEntry"}}}}}}}}},"components":{"schemas":{"CreateTagRequest":{"type":"object","properties":{"id":{"type":["string","null"],"format":"uuid"},"name":{"type":"string"},"color":{"type":"string"}},"required":["color","name"]},"TagResponse":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"name":{"type":"string"},"color":{"type":"string"},"version":{"type":"integer","format":"int64"},"createdAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"},"deletedAt":{"type":["string","null"],"format":"date-time"}},"required":["color","createdAt","id","name","updatedAt","version"]},"QuickAddRequest":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]},"At":{"type":"object","properties":{"allDay":{"type":"boolean"},"start":{"type":["string","null"],"format":"date-time"},"end":{"type":["string","null"],"format":"date-time"},"startDate":{"type":["string","null"],"format":"date"},"endDate":{"type":["string","null"],"format":"date"}}},"By":{"type":"object","properties":{"date":{"type":"string","format":"date"},"time":{"type":["string","null"],"format":"time-local"}},"required":["date"]},"CreateItemRequest":{"type":"object","properties":{"id":{"type":["string","null"],"format":"uuid"},"title":{"type":"string"},"notes":{"type":"string"},"by":{"oneOf":[{"$ref":"#/components/schemas/By"},{"type":"null"}]},"at":{"oneOf":[{"$ref":"#/components/schemas/At"},{"type":"null"}]},"parentId":{"type":["string","null"],"format":"uuid"},"mainTagId":{"type":["string","null"],"format":"uuid"},"tagIds":{"type":"array","items":{"type":"string","format":"uuid"}},"doneAt":{"type":["string","null"],"format":"date-time"},"source":{"oneOf":[{"$ref":"#/components/schemas/CreateSource"},{"type":"null"}]}}},"CreateSource":{"type":"object","properties":{"type":{"type":"string","enum":["manual","plms","email","upload"]},"ref":{"type":["string","null"]},"url":{"type":["string","null"]}},"required":["type"]},"QuickAddResult":{"type":"object","properties":{"parsed":{"type":"boolean"},"draft":{"$ref":"#/components/schemas/CreateItemRequest"},"unknownTags":{"type":"array","items":{"type":"string"}}},"required":["draft","parsed","unknownTags"]},"Derived":{"type":"object","properties":{"overdue":{"type":"boolean"},"color":{"type":["string","null"]},"displayTitle":{"type":"string"},"timeSpentMinutes":{"type":"integer","format":"int64"},"timePlannedMinutes":{"type":"integer","format":"int64"}},"required":["displayTitle","overdue","timePlannedMinutes","timeSpentMinutes"]},"ItemResponse":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"title":{"type":"string"},"notes":{"type":"string"},"by":{"oneOf":[{"$ref":"#/components/schemas/By"},{"type":"null"}]},"at":{"oneOf":[{"$ref":"#/components/schemas/At"},{"type":"null"}]},"parentId":{"type":["string","null"],"format":"uuid"},"mainTagId":{"type":["string","null"],"format":"uuid"},"tagIds":{"type":"array","items":{"type":"string","format":"uuid"}},"doneAt":{"type":["string","null"],"format":"date-time"},"source":{"$ref":"#/components/schemas/Source"},"version":{"type":"integer","format":"int64"},"createdAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"},"deletedAt":{"type":["string","null"],"format":"date-time"},"derived":{"$ref":"#/components/schemas/Derived"}},"required":["createdAt","derived","id","notes","source","tagIds","title","updatedAt","version"]},"Source":{"type":"object","properties":{"type":{"type":"string","enum":["manual","plms","email","upload"]},"ref":{"type":["string","null"]},"url":{"type":["string","null"]}},"required":["type"]},"UpdateTagRequest":{"type":"object","properties":{"name":{"type":["string","null"]},"color":{"type":["string","null"]}}},"JsonNode":{"type":"object","properties":{"array":{"type":"boolean"},"empty":{"type":"boolean"},"null":{"type":"boolean"},"float":{"type":"boolean"},"missingNode":{"type":"boolean"},"binary":{"type":"boolean"},"nodeType":{"type":"string","enum":["ARRAY","BINARY","BOOLEAN","MISSING","NULL","NUMBER","OBJECT","POJO","STRING"]},"string":{"type":"boolean"},"valueNode":{"type":"boolean"},"object":{"type":"boolean"},"short":{"type":"boolean"},"double":{"type":"boolean"},"bigDecimal":{"type":"boolean"},"bigInteger":{"type":"boolean"},"textual":{"type":"boolean","deprecated":true},"boolean":{"type":"boolean"},"number":{"type":"boolean"},"container":{"type":"boolean"},"pojo":{"type":"boolean"},"int":{"type":"boolean"},"long":{"type":"boolean"},"integralNumber":{"type":"boolean"},"floatingPointNumber":{"type":"boolean"},"embeddedValue":{"type":"boolean"}}},"ItemPage":{"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/ItemResponse"}},"nextCursor":{"type":["string","null"]}},"required":["items"]},"ChangesPage":{"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/ItemResponse"}},"tags":{"type":"array","items":{"$ref":"#/components/schemas/TagResponse"}},"cursor":{"type":"integer","format":"int64"},"hasMore":{"type":"boolean"}},"required":["cursor","hasMore","items","tags"]},"CalendarEntry":{"type":"object","properties":{"itemId":{"type":"string","format":"uuid"},"parentId":{"type":["string","null"],"format":"uuid"},"kind":{"type":"string","enum":["block","allDayBlock","deadline","allDayDeadline"]},"title":{"type":"string"},"color":{"type":["string","null"]},"done":{"type":"boolean"},"session":{"type":"boolean"},"overdue":{"type":"boolean"},"start":{"type":["string","null"],"format":"date-time"},"end":{"type":["string","null"],"format":"date-time"},"startDate":{"type":["string","null"],"format":"date"},"endDate":{"type":["string","null"],"format":"date"},"due":{"type":["string","null"],"format":"date-time"},"date":{"type":["string","null"],"format":"date"}},"required":["done","itemId","kind","overdue","session","title"]}}}}
+{
+  "components" : {
+    "schemas" : {
+      "At" : {
+        "properties" : {
+          "allDay" : {
+            "type" : "boolean"
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "endDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "By" : {
+        "properties" : {
+          "date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "time" : {
+            "format" : "time-local",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "date" ],
+        "type" : "object"
+      },
+      "CalendarEntry" : {
+        "properties" : {
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "date" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "done" : {
+            "type" : "boolean"
+          },
+          "due" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "endDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "itemId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "enum" : [ "block", "allDayBlock", "deadline", "allDayDeadline" ],
+            "type" : "string"
+          },
+          "overdue" : {
+            "type" : "boolean"
+          },
+          "parentId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "session" : {
+            "type" : "boolean"
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "done", "itemId", "kind", "overdue", "session", "title" ],
+        "type" : "object"
+      },
+      "ChangesPage" : {
+        "properties" : {
+          "cursor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "hasMore" : {
+            "type" : "boolean"
+          },
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ItemResponse"
+            },
+            "type" : "array"
+          },
+          "tags" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TagResponse"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "cursor", "hasMore", "items", "tags" ],
+        "type" : "object"
+      },
+      "CreateItemRequest" : {
+        "properties" : {
+          "at" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/At"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "by" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/By"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "doneAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "mainTagId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "notes" : {
+            "type" : "string"
+          },
+          "parentId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "source" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/CreateSource"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "tagIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CreateSource" : {
+        "properties" : {
+          "ref" : {
+            "type" : [ "string", "null" ]
+          },
+          "type" : {
+            "enum" : [ "manual", "plms", "email", "upload" ],
+            "type" : "string"
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "type" ],
+        "type" : "object"
+      },
+      "CreateTagRequest" : {
+        "properties" : {
+          "color" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "color", "name" ],
+        "type" : "object"
+      },
+      "Derived" : {
+        "properties" : {
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "displayTitle" : {
+            "type" : "string"
+          },
+          "overdue" : {
+            "type" : "boolean"
+          },
+          "timePlannedMinutes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "timeSpentMinutes" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "displayTitle", "overdue", "timePlannedMinutes", "timeSpentMinutes" ],
+        "type" : "object"
+      },
+      "ItemPage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ItemResponse"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "items" ],
+        "type" : "object"
+      },
+      "ItemResponse" : {
+        "properties" : {
+          "at" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/At"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "by" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/By"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deletedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "derived" : {
+            "$ref" : "#/components/schemas/Derived"
+          },
+          "doneAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "mainTagId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "notes" : {
+            "type" : "string"
+          },
+          "parentId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "source" : {
+            "$ref" : "#/components/schemas/Source"
+          },
+          "tagIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "createdAt", "derived", "id", "notes", "source", "tagIds", "title", "updatedAt", "version" ],
+        "type" : "object"
+      },
+      "JsonNode" : {
+        "properties" : {
+          "array" : {
+            "type" : "boolean"
+          },
+          "bigDecimal" : {
+            "type" : "boolean"
+          },
+          "bigInteger" : {
+            "type" : "boolean"
+          },
+          "binary" : {
+            "type" : "boolean"
+          },
+          "boolean" : {
+            "type" : "boolean"
+          },
+          "container" : {
+            "type" : "boolean"
+          },
+          "double" : {
+            "type" : "boolean"
+          },
+          "embeddedValue" : {
+            "type" : "boolean"
+          },
+          "empty" : {
+            "type" : "boolean"
+          },
+          "float" : {
+            "type" : "boolean"
+          },
+          "floatingPointNumber" : {
+            "type" : "boolean"
+          },
+          "int" : {
+            "type" : "boolean"
+          },
+          "integralNumber" : {
+            "type" : "boolean"
+          },
+          "long" : {
+            "type" : "boolean"
+          },
+          "missingNode" : {
+            "type" : "boolean"
+          },
+          "nodeType" : {
+            "enum" : [ "ARRAY", "BINARY", "BOOLEAN", "MISSING", "NULL", "NUMBER", "OBJECT", "POJO", "STRING" ],
+            "type" : "string"
+          },
+          "null" : {
+            "type" : "boolean"
+          },
+          "number" : {
+            "type" : "boolean"
+          },
+          "object" : {
+            "type" : "boolean"
+          },
+          "pojo" : {
+            "type" : "boolean"
+          },
+          "short" : {
+            "type" : "boolean"
+          },
+          "string" : {
+            "type" : "boolean"
+          },
+          "textual" : {
+            "deprecated" : true,
+            "type" : "boolean"
+          },
+          "valueNode" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "QuickAddRequest" : {
+        "properties" : {
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "text" ],
+        "type" : "object"
+      },
+      "QuickAddResult" : {
+        "properties" : {
+          "draft" : {
+            "$ref" : "#/components/schemas/CreateItemRequest"
+          },
+          "parsed" : {
+            "type" : "boolean"
+          },
+          "unknownTags" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "draft", "parsed", "unknownTags" ],
+        "type" : "object"
+      },
+      "Source" : {
+        "properties" : {
+          "ref" : {
+            "type" : [ "string", "null" ]
+          },
+          "type" : {
+            "enum" : [ "manual", "plms", "email", "upload" ],
+            "type" : "string"
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "type" ],
+        "type" : "object"
+      },
+      "TagResponse" : {
+        "properties" : {
+          "color" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deletedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "color", "createdAt", "id", "name", "updatedAt", "version" ],
+        "type" : "object"
+      },
+      "UpdateTagRequest" : {
+        "properties" : {
+          "color" : {
+            "type" : [ "string", "null" ]
+          },
+          "name" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/api/v1/calendar" : {
+      "get" : {
+        "operationId" : "entries",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "from",
+          "required" : true,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : true,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "tags",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "hideTags",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sessions",
+          "required" : false,
+          "schema" : {
+            "default" : true,
+            "type" : "boolean"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/CalendarEntry"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "calendar-controller" ]
+      }
+    },
+    "/api/v1/changes" : {
+      "get" : {
+        "operationId" : "changes",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "since",
+          "required" : false,
+          "schema" : {
+            "default" : 0,
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 500,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChangesPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "changes-controller" ]
+      }
+    },
+    "/api/v1/items" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "tag",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "parentId",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "topLevel",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "done",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "scheduled",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "overdue",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "q",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 50,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItemPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      },
+      "post" : {
+        "operationId" : "create_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateItemRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      }
+    },
+    "/api/v1/items/{id}" : {
+      "delete" : {
+        "operationId" : "delete_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      },
+      "get" : {
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      },
+      "patch" : {
+        "operationId" : "update_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JsonNode"
+              }
+            },
+            "application/merge-patch+json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JsonNode"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      }
+    },
+    "/api/v1/items/{id}/descendants" : {
+      "get" : {
+        "operationId" : "descendants",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/ItemResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      }
+    },
+    "/api/v1/items/{id}/restore" : {
+      "post" : {
+        "operationId" : "restore",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "item-controller" ]
+      }
+    },
+    "/api/v1/quick-add/parse" : {
+      "post" : {
+        "operationId" : "parse",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/QuickAddRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuickAddResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "quick-add-controller" ]
+      }
+    },
+    "/api/v1/tags" : {
+      "get" : {
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/TagResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "tag-controller" ]
+      },
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTagRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TagResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "tag-controller" ]
+      }
+    },
+    "/api/v1/tags/{id}" : {
+      "delete" : {
+        "operationId" : "delete",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "tag-controller" ]
+      },
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TagResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "tag-controller" ]
+      },
+      "patch" : {
+        "operationId" : "update",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateTagRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TagResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "tag-controller" ]
+      }
+    }
+  },
+  "servers" : [ {
+    "description" : "Generated server url",
+    "url" : ""
+  } ]
+}
