@@ -11,7 +11,7 @@ Design requirements live in `../docs/requirements.md`.
 ./gradlew bootTestRun
 ```
 
-Starts an embedded Postgres (data in `.devdb/`) and the API on http://localhost:8080 with **auth turned off**.
+Starts an embedded Postgres (data in `.devdb/`) and the API on http://localhost:8080.
 Swagger UI: http://localhost:8080/swagger-ui.html
 
 To enable quick add, set `LLM_API_KEY` (and optionally `LLM_MODEL`, default `gpt-6-luna`).
@@ -31,12 +31,12 @@ the API contract that clients are generated from. Commit it when it changes.
 |---|---|---|
 | `DB_R2DBC_URL` / `DB_JDBC_URL` | `localhost:5432/assistant` | Same database, two drivers (Flyway uses JDBC) |
 | `DB_USERNAME` / `DB_PASSWORD` | `assistant` | |
-| `AUTH_ENABLED` | `true` | |
-| `AUTH_OWNER_EMAIL` | | The only Google account allowed in |
-| `AUTH_GOOGLE_CLIENT_IDS` | | Comma-separated OAuth client IDs (web, Android, macOS) |
 | `LLM_API_KEY` | | Quick add falls back to a plain draft without it |
 | `LLM_MODEL` | `gpt-6-luna` | |
 | `LLM_BASE_URL` | `https://api.openai.com` | |
+
+The API has no login of its own. It is only reachable inside the cluster and through the
+Tailscale ingress, so the tailnet is the access boundary.
 
 ## API overview (`/api/v1`)
 

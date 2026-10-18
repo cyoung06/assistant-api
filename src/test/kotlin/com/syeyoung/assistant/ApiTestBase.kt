@@ -15,8 +15,6 @@ import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.await
-import org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockJwt
-import org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.springSecurity
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -59,7 +57,7 @@ class TestInfra {
     fun fakeExtractor() = FakeExtractor()
 }
 
-@SpringBootTest(properties = ["app.auth.enabled=true"])
+@SpringBootTest
 @Import(TestInfra::class)
 abstract class ApiTestBase {
     @Autowired lateinit var context: ApplicationContext
@@ -86,11 +84,7 @@ abstract class ApiTestBase {
     @BeforeEach
     fun setUp() {
         runBlocking { db.sql("truncate items, tags").await() }
-        client = WebTestClient.bindToApplicationContext(context)
-            .apply(springSecurity())
-            .configureClient()
-            .build()
-            .mutateWith(mockJwt())
+        client = WebTestClient.bindToApplicationContext(context).build()
     }
 
     // ---- helpers ------------------------------------------------------------

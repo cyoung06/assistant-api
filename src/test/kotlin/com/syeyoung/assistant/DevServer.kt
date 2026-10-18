@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * Local development server: `./gradlew bootTestRun`.
- * Starts an embedded Postgres (data kept in `.devdb/`) and the API on :8080 with auth turned off.
+ * Starts an embedded Postgres (data kept in `.devdb/`) and the API on :8080.
  */
 fun main(args: Array<String>) {
     val dataDir = File(".devdb").absoluteFile.apply { mkdirs() }
@@ -23,7 +23,6 @@ fun main(args: Array<String>) {
     System.setProperty("spring.flyway.url", "jdbc:postgresql://localhost:$DEV_DB_PORT/postgres")
     System.setProperty("spring.flyway.user", "postgres")
     System.setProperty("spring.flyway.password", "postgres")
-    System.setProperty("app.auth.enabled", "false")
 
     fromApplication<AssistantApplication>().run(*args)
 }

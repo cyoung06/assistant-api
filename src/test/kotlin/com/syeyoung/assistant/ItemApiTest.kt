@@ -146,13 +146,5 @@ class ItemApiTest : ApiTestBase() {
         assertThat(second["nextCursor"]).isNull()
     }
 
-    @Test
-    fun `requires authentication`() {
-        org.springframework.test.web.reactive.server.WebTestClient.bindToApplicationContext(context)
-            .apply(org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.springSecurity())
-            .configureClient().build()
-            .get().uri("/api/v1/items").exchange().expectStatus().isUnauthorized
-    }
-
     private fun timed(start: String, end: String) = mapOf("start" to start, "end" to end)
 }
