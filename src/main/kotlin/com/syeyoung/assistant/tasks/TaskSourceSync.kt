@@ -86,14 +86,42 @@ class TaskSourceSync(
     }
 
     /**
+     * One project per course (or other grouping) the source lists: created when missing, left
+     * alone if the user deleted it. Same-named groupings (sections of one course) share a project.
+     * The source's projects no longer listed are marked completed. Returns how many were created.
+     */
+    suspend fun syncProjects(type: SourceType, tags: List<SourceTag>, now: Instant): Int {
+        val known = sources.refs(type)
+        var created = 0
+        for (tag in tags.distinctBy { it.name }) {
+            val ref = "${type.wire}:project:${tag.name}"
+            val existing = findProject(type, tag)
+            if (existing == null && ref in known) continue
+            val id = existing?.id ?: resolveProject(type, tag, now).also { created++ }
+            sources.rememberRef(type, ref, id.toString())
+        }
+        val listed = tags.map { it.name }.toSet()
+        val active = setOf(ProjectState.BACKLOG, ProjectState.PLANNED, ProjectState.IN_PROGRESS)
+        for (p in repo.projects().filter { it.sourceType == type.wire && it.state in active && it.name !in listed }) {
+            repo.updateProject(p.copy(state = ProjectState.COMPLETED), now)
+        }
+        return created
+    }
+
+    private suspend fun findProject(type: SourceType, tag: SourceTag): ProjectRow? {
+        val all = repo.projects()
+        return all.find { it.sourceType == type.wire && it.sourceKey == tag.key } ?: all.find { it.sourceType == type.wire && it.name == tag.name }
+    }
+
+    /**
      * The project standing for [tag]: the one mapped to its key, else a same-named project of this
-     * source without a key (claimed), else a new one.
+     * source (claimed when it has no key yet), else a new one.
      */
     private suspend fun resolveProject(type: SourceType, tag: SourceTag, now: Instant): UUID {
         val all = repo.projects()
         all.find { it.sourceType == type.wire && it.sourceKey == tag.key }?.let { return it.id }
-        all.find { it.sourceType == type.wire && it.sourceKey == null && it.name == tag.name }?.let {
-            repo.updateProject(it.copy(sourceKey = tag.key), now)
+        all.find { it.sourceType == type.wire && it.name == tag.name }?.let {
+            if (it.sourceKey == null) repo.updateProject(it.copy(sourceKey = tag.key), now)
             return it.id
         }
         val p = ProjectRow(UUID.randomUUID(), tag.name, "", leastUsed(all.map { it.color }), ProjectState.IN_PROGRESS, type.wire, tag.key)

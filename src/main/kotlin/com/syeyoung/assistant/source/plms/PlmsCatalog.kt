@@ -4,6 +4,9 @@ import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.refs.Ref
 import com.syeyoung.assistant.refs.RefIndex
 import com.syeyoung.assistant.refs.RefKind
+import com.syeyoung.assistant.source.SourceTag
+import com.syeyoung.assistant.source.SourceType
+import com.syeyoung.assistant.tasks.TaskSourceSync
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -24,12 +27,18 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * What can be referenced in PLMS: each course in progress, its files, boards and assignments, and
+ * What can be referenced in PLMS, and a project per course: each course in progress, its files, boards and assignments, and
  * the recent posts on its boards (notices, Q&A). Read from the course and board pages, since
  * PLMS's Moodle doesn't offer course contents to the web service; refreshed every few hours.
  */
 @Component
-class PlmsCatalog(private val plms: PlmsSource, private val index: RefIndex, private val clock: Clock, private val props: AppProperties) {
+class PlmsCatalog(
+    private val plms: PlmsSource,
+    private val index: RefIndex,
+    private val projects: TaskSourceSync,
+    private val clock: Clock,
+    private val props: AppProperties,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val base = props.sources.plms.baseUrl.trimEnd('/')
@@ -54,7 +63,11 @@ class PlmsCatalog(private val plms: PlmsSource, private val index: RefIndex, pri
 
     suspend fun refresh(): Int {
         val refs = mutableListOf<Ref>()
-        for (course in plms.client.courses()) {
+        val courses = plms.client.courses()
+        // A project per course this semester; ended courses' projects are completed.
+        val tags = courses.map { SourceTag("course:${it.path("id").asLong()}", PlmsSource.courseName(it.path("fullname").asString(""))) }
+        projects.syncProjects(SourceType.PLMS, tags, Instant.now(clock))
+        for (course in courses) {
             val id = course.path("id").asLong()
             val name = PlmsSource.courseName(course.path("fullname").asString(""))
             val courseUrl = "$base/course/view.php?id=$id"
