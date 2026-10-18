@@ -20,7 +20,7 @@ class ItemViews(
         val now = Instant.now(clock)
         val ids = list.map { it.id }
         val lineage = items.lineage(ids)
-        val totals = items.sessionTotals(ids, now)
+        val totals = items.descendantTotals(ids, now)
         return list.map { item ->
             val l = lineage[item.id]
             val t = totals[item.id]
@@ -32,6 +32,8 @@ class ItemViews(
                     displayTitle = l?.displayTitle ?: item.fields.title,
                     timeSpentMinutes = t?.spentMinutes ?: 0,
                     timePlannedMinutes = t?.plannedMinutes ?: 0,
+                    subItems = t?.subItems ?: 0,
+                    subItemsDone = t?.subItemsDone ?: 0,
                 ),
             )
         }

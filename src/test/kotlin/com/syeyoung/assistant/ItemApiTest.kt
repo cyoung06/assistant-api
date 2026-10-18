@@ -49,6 +49,8 @@ class ItemApiTest : ApiTestBase() {
         val reloaded = get("/api/v1/items/$id")
         assertThat(reloaded.derived()["timeSpentMinutes"]).isEqualTo(120)
         assertThat(reloaded.derived()["timePlannedMinutes"]).isEqualTo(180)
+        assertThat(reloaded.derived()["subItems"]).isEqualTo(2)
+        assertThat(reloaded.derived()["subItemsDone"]).isEqualTo(0)
 
         assertThat(upcoming.derived()["color"]).isEqualTo("#3B82F6")
         assertThat(upcoming.derived()["displayTitle"]).isEqualTo("Q4–6")

@@ -19,7 +19,13 @@ import java.util.UUID
 
 data class Lineage(val color: String?, val displayTitle: String, val tagIds: Set<UUID>)
 
-data class SessionTotals(val spentMinutes: Long, val plannedMinutes: Long)
+/** Aggregates over an item's live descendants. */
+data class DescendantTotals(
+    val spentMinutes: Long,
+    val plannedMinutes: Long,
+    val subItems: Int,
+    val subItemsDone: Int,
+)
 
 data class ItemFilter(
     val tagId: UUID? = null,
@@ -228,8 +234,11 @@ class ItemRepository(private val db: DatabaseClient) {
         }.flow().toList().toMap()
     }
 
-    /** Minutes of timed descendants of each of [ids], split by whether they are done or over as of [now]. */
-    suspend fun sessionTotals(ids: Collection<UUID>, now: Instant): Map<UUID, SessionTotals> {
+    /**
+     * For each of [ids]: minutes of timed descendants, split by whether they are done or over as of
+     * [now], and how many descendants there are and how many are done.
+     */
+    suspend fun descendantTotals(ids: Collection<UUID>, now: Instant): Map<UUID, DescendantTotals> {
         if (ids.isEmpty()) return emptyMap()
         return db.sql(
             """
@@ -240,15 +249,16 @@ class ItemRepository(private val db: DatabaseClient) {
             )
             select d.origin,
                 coalesce(sum(extract(epoch from i.at_end - i.at_start) / 60)
-                    filter (where i.done_at is not null or i.at_end <= :now), 0)::bigint as spent,
+                    filter (where i.at_start is not null and (i.done_at is not null or i.at_end <= :now)), 0)::bigint as spent,
                 coalesce(sum(extract(epoch from i.at_end - i.at_start) / 60)
-                    filter (where i.done_at is null and i.at_end > :now), 0)::bigint as planned
+                    filter (where i.at_start is not null and i.done_at is null and i.at_end > :now), 0)::bigint as planned,
+                count(*)::int as sub_items,
+                (count(*) filter (where i.done_at is not null))::int as sub_items_done
             from down d join items i on i.id = d.id
-            where i.at_start is not null
             group by d.origin
             """,
         ).bind("ids", ids.toTypedArray()).bind("now", now).map { r ->
-            r.req<UUID>("origin") to SessionTotals(r.req("spent"), r.req("planned"))
+            r.req<UUID>("origin") to DescendantTotals(r.req("spent"), r.req("planned"), r.req("sub_items"), r.req("sub_items_done"))
         }.flow().toList().toMap()
     }
 

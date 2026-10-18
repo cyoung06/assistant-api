@@ -219,6 +219,14 @@
           "overdue" : {
             "type" : "boolean"
           },
+          "subItems" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "subItemsDone" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "timePlannedMinutes" : {
             "format" : "int64",
             "type" : "integer"
@@ -228,7 +236,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "displayTitle", "overdue", "timePlannedMinutes", "timeSpentMinutes" ],
+        "required" : [ "displayTitle", "overdue", "subItems", "subItemsDone", "timePlannedMinutes", "timeSpentMinutes" ],
         "type" : "object"
       },
       "ItemPage" : {

@@ -80,6 +80,10 @@ data class Derived(
     val timeSpentMinutes: Long,
     /** Timed descendants that are not done and have not ended yet. */
     val timePlannedMinutes: Long,
+    /** All live descendants, at any depth. */
+    val subItems: Int,
+    /** Of [subItems], how many are done. */
+    val subItemsDone: Int,
 )
 
 data class ItemResponse(
