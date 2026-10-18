@@ -10,6 +10,7 @@ data class AppProperties(
     /** Where the web app is reached; links to the app's own things (tasks, events, mail) start with it. */
     val publicUrl: String = "http://localhost:5173",
     val sources: Sources = Sources(),
+    val llm: Llm = Llm(),
     val dav: Dav = Dav(),
 ) {
     /** The CalDAV server (Radicale) holding events and todos. */
@@ -66,4 +67,12 @@ data class AppProperties(
             val catalogInterval: Duration = Duration.ofHours(6),
         )
     }
+
+    /** The model that reads shared screenshots and text on request (capture); off without a key. */
+    data class Llm(
+        val baseUrl: String = "https://api.openai.com",
+        val apiKey: String = "",
+        val model: String = "gpt-6-luna",
+        val timeout: Duration = Duration.ofSeconds(90),
+    )
 }

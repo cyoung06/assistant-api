@@ -27,7 +27,7 @@ data class TaskFilter(
 )
 
 /** Everything a response needs, read once per request (the data is one person's tasks). */
-private class TaskGraph(val tasks: List<TaskRow>, val relations: List<RelationRow>) {
+private class TaskGraph(val tasks: List<TaskRow>, val relations: List<RelationRow>, val attachments: Map<UUID, List<AttachmentInfo>>) {
     val byId = tasks.associateBy { it.id }
     val children = tasks.filter { it.parentId != null }.groupBy { it.parentId!! }
 
@@ -48,6 +48,7 @@ data class TaskClosed(val id: UUID, val sourceType: String?, val sourceRef: Stri
 @Service
 class TaskService(
     private val repo: TaskRepository,
+    private val attachments: AttachmentRepository,
     private val clock: Clock,
     private val mapper: ObjectMapper,
     private val events: ApplicationEventPublisher,
@@ -81,6 +82,7 @@ class TaskService(
         req.parentId?.let { repo.task(it) ?: throw ValidationException("No task $it") }
         req.projectId?.let { repo.project(it) ?: throw ValidationException("No project $it") }
         checkLabels(req.labelIds)
+        if (!attachments.exists(req.attachmentIds)) throw ValidationException("Unknown attachment")
         val id = repo.insert(
             TaskValues(
                 title = title, description = req.description, status = req.status, priority = req.priority,
@@ -90,11 +92,12 @@ class TaskService(
             now,
         )
         repo.setLabels(id, req.labelIds)
+        if (req.attachmentIds.isNotEmpty()) attachments.setForTask(id, req.attachmentIds)
         return task(id)
     }
 
     /**
-     * Merge patch: title, description, status, priority, due, projectId, labelIds, parentId. A source
+     * Merge patch: title, description, status, priority, due, projectId, labelIds, attachmentIds, parentId. A source
      * owns the title and due date of its tasks. [ifMatch] is the version the client last saw.
      */
     @Transactional
@@ -105,6 +108,7 @@ class TaskService(
         val now = Instant.now(clock)
         var v = current.values()
         var labels: List<UUID>? = null
+        var files: List<UUID>? = null
         for ((name, value) in patch.properties()) {
             if (current.sourceType != null && name in setOf("title", "due")) {
                 throw ConflictException("fixed", "This task comes from ${current.sourceType.uppercase()}; its $name is set there")
@@ -121,12 +125,18 @@ class TaskService(
                 "due" -> n?.let { mapper.treeToValue(it, DueDto::class.java) }.let { v.copy(dueDate = it?.date, dueTime = it?.time) }
                 "projectId" -> v.copy(projectId = n?.let { uuid(it.asString()) }?.also { p -> repo.project(p) ?: throw ValidationException("No project $p") })
                 "labelIds" -> { labels = n?.let { a -> (0 until a.size()).map { uuid(a.get(it).asString()) } }.orEmpty(); v }
+                "attachmentIds" -> { files = n?.let { a -> (0 until a.size()).map { uuid(a.get(it).asString()) } }.orEmpty(); v }
                 "parentId" -> v.copy(parentId = n?.let { uuid(it.asString()) }?.also { checkParent(id, it) })
                 else -> throw ValidationException("Unknown or read-only field '$name'")
             }
         }
         if (!repo.update(id, current.version, v, now)) throw VersionMismatchException(repo.task(id)?.version ?: current.version)
         labels?.let { checkLabels(it); repo.setLabels(id, it) }
+        files?.let {
+            if (!attachments.exists(it)) throw ValidationException("Unknown attachment")
+            attachments.setForTask(id, it)
+            repo.touch(id, now)
+        }
         if (v.status.closed && !current.status.closed) events.publishEvent(TaskClosed(id, current.sourceType, current.sourceRef))
         return task(id)
     }
@@ -240,7 +250,7 @@ class TaskService(
 
     // ---- rendering ------------------------------------------------------------------
 
-    private suspend fun graph() = TaskGraph(repo.tasks(), repo.relations())
+    private suspend fun graph() = TaskGraph(repo.tasks(), repo.relations(), attachments.byTask())
 
     private fun render(g: TaskGraph, t: TaskRow): TaskResponse {
         val subs = g.descendants(t.id)
@@ -266,7 +276,7 @@ class TaskService(
             due = t.dueDate?.let { DueDto(it, t.dueTime) }, projectId = t.projectId, labelIds = t.labelIds, parentId = t.parentId,
             subtasks = subs.size, subtasksDone = subs.count { it.status == TaskStatus.DONE },
             relations = relations, blocked = relations.any { it.kind == RelationKind.BLOCKED_BY && !it.task.status.closed },
-            source = t.sourceType, url = t.sourceUrl, overdue = isOverdue(t, Instant.now(clock)),
+            source = t.sourceType, url = t.sourceUrl, attachments = g.attachments[t.id].orEmpty(), overdue = isOverdue(t, Instant.now(clock)),
             createdAt = t.createdAt, updatedAt = t.updatedAt, closedAt = t.closedAt, version = t.version,
         )
     }

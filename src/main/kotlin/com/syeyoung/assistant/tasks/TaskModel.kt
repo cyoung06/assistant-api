@@ -119,6 +119,8 @@ data class TaskResponse(
     /** Set when a source (e.g. "plms") owns the title, due date and link. */
     val source: String?,
     val url: String?,
+    /** Files kept with the task (e.g. a shared screenshot); served at /api/v1/attachments/{id}. */
+    val attachments: List<AttachmentInfo>,
     val overdue: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -135,6 +137,8 @@ data class CreateTaskRequest(
     val projectId: UUID? = null,
     val labelIds: List<UUID> = emptyList(),
     val parentId: UUID? = null,
+    /** Uploaded attachments to keep with the task. */
+    val attachmentIds: List<UUID> = emptyList(),
 )
 
 data class CreateRelationRequest(val kind: String, val taskId: UUID)

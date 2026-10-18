@@ -1,6 +1,57 @@
 {
   "components" : {
     "schemas" : {
+      "AnalyzeRequest" : {
+        "properties" : {
+          "attachmentIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "AnalyzeResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Proposal"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "items" ],
+        "type" : "object"
+      },
+      "AttachmentInfo" : {
+        "properties" : {
+          "contentType" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "filename" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "contentType", "createdAt", "filename", "id", "size" ],
+        "type" : "object"
+      },
       "CalendarResponse" : {
         "properties" : {
           "color" : {
@@ -94,6 +145,13 @@
       },
       "CreateTaskRequest" : {
         "properties" : {
+          "attachmentIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "description" : {
             "type" : "string"
           },
@@ -493,6 +551,59 @@
         "required" : [ "color", "description", "doneCount", "id", "name", "state", "taskCount" ],
         "type" : "object"
       },
+      "Proposal" : {
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "due" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/DueDto"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "end" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "endDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "labelIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "priority" : {
+            "enum" : [ "none", "urgent", "high", "medium", "low" ],
+            "type" : "string"
+          },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "start" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "startDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "description", "kind", "title" ],
+        "type" : "object"
+      },
       "Ref" : {
         "properties" : {
           "context" : {
@@ -661,6 +772,12 @@
       },
       "TaskResponse" : {
         "properties" : {
+          "attachments" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AttachmentInfo"
+            },
+            "type" : "array"
+          },
           "blocked" : {
             "type" : "boolean"
           },
@@ -748,7 +865,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "blocked", "createdAt", "description", "id", "labelIds", "number", "overdue", "priority", "relations", "status", "subtasks", "subtasksDone", "title", "updatedAt", "version" ],
+        "required" : [ "attachments", "blocked", "createdAt", "description", "id", "labelIds", "number", "overdue", "priority", "relations", "status", "subtasks", "subtasksDone", "title", "updatedAt", "version" ],
         "type" : "object"
       },
       "UpdateCalendarRequest" : {
@@ -806,6 +923,87 @@
         "tags" : [ "move-from-cal-dav" ]
       }
     },
+    "/api/v1/attachments" : {
+      "post" : {
+        "operationId" : "upload",
+        "requestBody" : {
+          "content" : {
+            "multipart/form-data" : {
+              "schema" : {
+                "properties" : {
+                  "file" : {
+                    "format" : "binary",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "file" ],
+                "type" : "object"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AttachmentInfo"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "attachment-controller" ]
+      }
+    },
+    "/api/v1/attachments/{id}" : {
+      "delete" : {
+        "operationId" : "delete_2",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "attachment-controller" ]
+      },
+      "get" : {
+        "operationId" : "download",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "attachment-controller" ]
+      }
+    },
     "/api/v1/calendars" : {
       "get" : {
         "operationId" : "calendars",
@@ -861,6 +1059,34 @@
           }
         },
         "tags" : [ "calendar-controller" ]
+      }
+    },
+    "/api/v1/capture/analyze" : {
+      "post" : {
+        "operationId" : "analyze",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AnalyzeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "capture-controller" ]
       }
     },
     "/api/v1/events" : {
