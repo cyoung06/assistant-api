@@ -59,10 +59,17 @@ class CalendarService(
     private val props: AppProperties,
 ) {
     /**
-     * Entries for the days [from] (inclusive) to [to] (exclusive). When [tagIds] is not empty, only
-     * items carrying one of them, directly or through an ancestor, are included.
+     * Entries for the days [from] (inclusive) to [to] (exclusive). An item "carries" a tag when it or
+     * an ancestor has it. When [tagIds] is not empty, only items carrying one of them are included;
+     * items carrying any of [hiddenTagIds] are left out.
      */
-    suspend fun entries(from: LocalDate, to: LocalDate, tagIds: Set<UUID>, includeSessions: Boolean): List<CalendarEntry> {
+    suspend fun entries(
+        from: LocalDate,
+        to: LocalDate,
+        tagIds: Set<UUID>,
+        hiddenTagIds: Set<UUID>,
+        includeSessions: Boolean,
+    ): List<CalendarEntry> {
         if (!to.isAfter(from)) throw ValidationException("'to' must be after 'from'")
         if (ChronoUnit.DAYS.between(from, to) > MAX_DAYS) throw ValidationException("Range is longer than $MAX_DAYS days")
 
@@ -72,7 +79,10 @@ class CalendarService(
         val now = Instant.now(clock)
 
         return candidates
-            .filter { tagIds.isEmpty() || lineage[it.id]?.tagIds.orEmpty().any(tagIds::contains) }
+            .filter { item ->
+                val carried = lineage[item.id]?.tagIds.orEmpty()
+                (tagIds.isEmpty() || carried.any(tagIds::contains)) && carried.none(hiddenTagIds::contains)
+            }
             .flatMap { item ->
                 val l = lineage[item.id]
                 entriesFor(item, l?.displayTitle ?: item.fields.title, l?.color, now, from, to)
@@ -135,6 +145,7 @@ class CalendarController(private val service: CalendarService) {
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) from: LocalDate,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) to: LocalDate,
         @RequestParam(required = false) tags: List<UUID>?,
+        @RequestParam(required = false) hideTags: List<UUID>?,
         @RequestParam(defaultValue = "true") sessions: Boolean,
-    ): List<CalendarEntry> = service.entries(from, to, tags.orEmpty().toSet(), sessions)
+    ): List<CalendarEntry> = service.entries(from, to, tags.orEmpty().toSet(), hideTags.orEmpty().toSet(), sessions)
 }

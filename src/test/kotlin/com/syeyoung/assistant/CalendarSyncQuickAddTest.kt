@@ -37,6 +37,10 @@ class CalendarSyncQuickAddTest : ApiTestBase() {
         val courseOnly = getList("/api/v1/calendar?from=2026-10-18&to=2026-10-25&tags=$course")
         assertThat(courseOnly.map { it["kind"] }).containsExactly("block", "deadline")
 
+        // Hiding a tag hides its items (and their sessions) but keeps untagged ones.
+        val hideCourse = getList("/api/v1/calendar?from=2026-10-18&to=2026-10-25&hideTags=$course")
+        assertThat(hideCourse.map { it["title"] }).containsExactly("Festival", "Meeting", "Pay rent")
+
         val noSessions = getList("/api/v1/calendar?from=2026-10-18&to=2026-10-25&sessions=false")
         assertThat(noSessions.none { it["session"] == true }).isTrue()
     }
