@@ -27,6 +27,9 @@ app:
           name: Korean holidays
           url: https://calendar.google.com/calendar/ical/ko.south_korea%23holiday%40group.v.calendar.google.com/public/basic.ics
           tag: holiday
+    mail:
+      client-id: ${MAIL_CLIENT_ID:}
+      token-key: ${MAIL_TOKEN_KEY:}
   dav:
     url: ${DAV_URL:http://localhost:5232}
     username: ${DAV_USERNAME:}

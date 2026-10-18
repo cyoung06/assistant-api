@@ -32,6 +32,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.1.1")
 
+    // IMAP for the mail source (version from Spring Boot's dependency management).
+    implementation("org.eclipse.angus:angus-mail")
+
     // iCalendar recurrence expansion (any RRULE a calendar app may write).
     implementation("org.mnode.ical4j:ical4j:4.4.0")
 
@@ -46,6 +49,8 @@ dependencies {
     testImplementation("io.zonky.test:embedded-postgres:2.2.2")
     testImplementation(enforcedPlatform("io.zonky.test.postgres:embedded-postgres-binaries-bom:16.15.0"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
+    // An in-memory IMAP server for the mail source's tests.
+    testImplementation("com.icegreen:greenmail:2.1.14")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

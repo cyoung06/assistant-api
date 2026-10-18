@@ -30,6 +30,8 @@ data class SourceSnapshot(
      * Null: never complete missing items.
      */
     val completeMissingDueFrom: Instant? = null,
+    /** Every open task from this source that is no longer reported is marked done (e.g. a mail unflagged). */
+    val completeMissing: Boolean = false,
     /**
      * Items from this source that are no longer reported are deleted (for calendars, where a missing
      * event was removed rather than completed).
@@ -50,6 +52,8 @@ data class SourceRecord(
     val atStartDate: LocalDate? = null,
     val atEndDate: LocalDate? = null,
     val notes: String? = null,
+    /** False: [notes] only start the description, which is then the user's to edit. */
+    val ownsNotes: Boolean = true,
     val url: String? = null,
     /** Labels for a task, categories for an event, set when it's created (e.g. "assignment"). */
     val tags: List<SourceTag> = emptyList(),

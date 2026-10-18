@@ -22,7 +22,24 @@ data class AppProperties(
         val initialDelay: Duration = Duration.ofSeconds(30),
         val plms: Plms = Plms(),
         val ical: Ical = Ical(),
+        val mail: Mail = Mail(),
     ) {
+        /**
+         * Microsoft 365 mail (POSTECH's Outlook) over IMAP with OAuth. [clientId] is our app
+         * registration in Microsoft Entra (a public client: no secret); empty turns the source off.
+         * [tokenKey] encrypts the stored refresh token (base64, 32 bytes).
+         */
+        data class Mail(
+            val clientId: String = "",
+            val tenant: String = "organizations",
+            val authority: String = "https://login.microsoftonline.com",
+            val imapHost: String = "outlook.office365.com",
+            val imapPort: Int = 993,
+            val imapSsl: Boolean = true,
+            val tokenKey: String = "",
+            val interval: Duration = Duration.ofMinutes(5),
+        )
+
         data class Ical(
             val subscriptions: List<Subscription> = emptyList(),
             val interval: Duration = Duration.ofHours(12),

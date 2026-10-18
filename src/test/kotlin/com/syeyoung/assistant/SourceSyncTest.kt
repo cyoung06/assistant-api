@@ -16,9 +16,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 
-/** A source whose snapshot each test sets. Uses the `email` type so it can't collide with PLMS. */
+/** A source whose snapshot each test sets. Uses the `upload` type so it can't collide with real sources. */
 class FakeSource : DataSource {
-    override val type = SourceType.EMAIL
+    override val type = SourceType.UPLOAD
     override val displayName = "Fake"
     override val enabled = true
     override val interval: Duration = Duration.ofHours(1)
@@ -47,12 +47,12 @@ class SourceSyncTest : ApiTestBase() {
 
     @Suppress("UNCHECKED_CAST")
     private fun sync(): Map<String, Any?> =
-        client.post().uri("/api/v1/sources/email/sync").exchange().expectStatus().isOk
+        client.post().uri("/api/v1/sources/upload/sync").exchange().expectStatus().isOk
             .expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
 
     private fun report() = sync()["lastReport"] as Map<*, *>
 
-    private fun synced() = getList("/api/v1/tasks").filter { it["source"] == "email" }
+    private fun synced() = getList("/api/v1/tasks").filter { it["source"] == "upload" }
 
     @Test
     fun `creates tasks in a project with labels, then updates only what the source owns`() {
@@ -60,7 +60,7 @@ class SourceSyncTest : ApiTestBase() {
         assertThat(report()["created"]).isEqualTo(1)
         val task = synced().single()
         val project = getList("/api/v1/projects").single()
-        assertThat(project).containsEntry("name", "확률및통계").containsEntry("source", "email")
+        assertThat(project).containsEntry("name", "확률및통계").containsEntry("source", "upload")
         assertThat(task["projectId"]).isEqualTo(project["id"])
         val label = getList("/api/v1/labels").single()
         assertThat(label["name"]).isEqualTo("assignment")
@@ -110,7 +110,7 @@ class SourceSyncTest : ApiTestBase() {
     @Test
     fun `a same-named project from before is claimed instead of duplicated`() {
         runBlocking {
-            db.sql("insert into projects (id, name, color, source_type) values (gen_random_uuid(), '확률및통계', '#2F5BE0', 'email')").await()
+            db.sql("insert into projects (id, name, color, source_type) values (gen_random_uuid(), '확률및통계', '#2F5BE0', 'upload')").await()
         }
         fake.snapshot = SourceSnapshot(listOf(record("assign:1", "A", "2026-10-20"), record("assign:2", "B", "2026-10-21")))
         sync()
@@ -149,7 +149,7 @@ class SourceSyncTest : ApiTestBase() {
         val ok = sync()
         assertThat(ok["lastError"]).isNull()
         assertThat(ok["lastSuccessAt"]).isNotNull()
-        assertThat(getList("/api/v1/sources").map { it["type"] }).contains("plms", "email")
+        assertThat(getList("/api/v1/sources").map { it["type"] }).contains("plms", "upload")
     }
 
     @Test

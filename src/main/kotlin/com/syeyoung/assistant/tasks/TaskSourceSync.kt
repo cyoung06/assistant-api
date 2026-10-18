@@ -48,12 +48,12 @@ class TaskSourceSync(
                     report.copy(created = report.created + 1)
                 }
                 current.title == record.title && current.dueDate == record.dueDate && current.dueTime == record.dueTime &&
-                    current.sourceUrl == record.url && (record.notes == null || current.description == record.notes) ->
+                    current.sourceUrl == record.url && (!record.ownsNotes || record.notes == null || current.description == record.notes) ->
                     report.copy(unchanged = report.unchanged + 1)
                 else -> {
                     fun withSource(t: TaskRow) = t.values().copy(
                         title = record.title, dueDate = record.dueDate, dueTime = record.dueTime, sourceUrl = record.url,
-                        description = record.notes ?: t.description,
+                        description = record.notes?.takeIf { record.ownsNotes } ?: t.description,
                     )
                     // If the user edited it meanwhile, apply the source's fields on top of that edit.
                     if (!repo.update(current.id, current.version, withSource(current), now)) {
@@ -68,6 +68,11 @@ class TaskSourceSync(
         val missing = existing.values.filter { it.sourceRef !in reported }
         if (snapshot.deleteMissing) {
             for (t in missing) { repo.delete(t.id); report = report.copy(deleted = report.deleted + 1) }
+        } else if (snapshot.completeMissing) {
+            for (t in missing.filter { !it.status.closed }) {
+                repo.update(t.id, t.version, t.values().copy(status = TaskStatus.DONE, closedAt = now), now)
+                report = report.copy(completed = report.completed + 1)
+            }
         } else snapshot.completeMissingDueFrom?.let { from ->
             for (t in missing) {
                 if (t.status.closed || t.dueDate == null) continue

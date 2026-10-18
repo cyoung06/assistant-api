@@ -378,6 +378,34 @@
         "required" : [ "color", "id", "name" ],
         "type" : "object"
       },
+      "MailAccountStatus" : {
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "email" : {
+            "type" : [ "string", "null" ]
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          },
+          "expiresAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "userCode" : {
+            "type" : [ "string", "null" ]
+          },
+          "verificationUri" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "configured", "state" ],
+        "type" : "object"
+      },
       "MoveReport" : {
         "properties" : {
           "labels" : {
@@ -1091,6 +1119,52 @@
           }
         },
         "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/mail/account" : {
+      "delete" : {
+        "operationId" : "disconnect",
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "mail-controller" ]
+      },
+      "get" : {
+        "operationId" : "account",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MailAccountStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "mail-controller" ]
+      }
+    },
+    "/api/v1/mail/connect" : {
+      "post" : {
+        "operationId" : "connect",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MailAccountStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "mail-controller" ]
       }
     },
     "/api/v1/projects" : {

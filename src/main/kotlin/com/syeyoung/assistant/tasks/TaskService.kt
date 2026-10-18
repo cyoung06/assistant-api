@@ -5,6 +5,7 @@ import com.syeyoung.assistant.common.NotFoundException
 import com.syeyoung.assistant.common.ValidationException
 import com.syeyoung.assistant.common.VersionMismatchException
 import com.syeyoung.assistant.config.AppProperties
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import tools.jackson.databind.JsonNode
@@ -41,11 +42,15 @@ private class TaskGraph(val tasks: List<TaskRow>, val relations: List<RelationRo
     }
 }
 
+/** Published when a task is closed (done or canceled) from the app, e.g. so a mail source can clear the mail's flag. */
+data class TaskClosed(val id: UUID, val sourceType: String?, val sourceRef: String?)
+
 @Service
 class TaskService(
     private val repo: TaskRepository,
     private val clock: Clock,
     private val mapper: ObjectMapper,
+    private val events: ApplicationEventPublisher,
     props: AppProperties,
 ) {
     private val zone = props.zone
@@ -122,6 +127,7 @@ class TaskService(
         }
         if (!repo.update(id, current.version, v, now)) throw VersionMismatchException(repo.task(id)?.version ?: current.version)
         labels?.let { checkLabels(it); repo.setLabels(id, it) }
+        if (v.status.closed && !current.status.closed) events.publishEvent(TaskClosed(id, current.sourceType, current.sourceRef))
         return task(id)
     }
 
