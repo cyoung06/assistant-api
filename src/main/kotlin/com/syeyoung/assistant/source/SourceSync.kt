@@ -100,15 +100,19 @@ class SourceApplier(
     private suspend fun resolveTag(type: SourceType, tag: SourceTag, now: Instant): UUID? {
         sources.mappedTag(type, tag.key)?.let { mapped -> return tags.find(mapped)?.id }
         val id = tags.findAll().firstOrNull { it.name.equals(tag.name, ignoreCase = true) }?.id
-            ?: tags.insert(UUID.randomUUID(), tag.name.take(60), colorFor(tag.name), now).id
+            ?: tags.insert(UUID.randomUUID(), tag.name.take(60), leastUsedColor(), now).id
         sources.mapTag(type, tag.key, id)
         return id
     }
 
-    private fun colorFor(name: String) = PALETTE[Math.floorMod(name.hashCode(), PALETTE.size)]
+    /** The palette color fewest tags use, so a new course doesn't share a color with another. */
+    private suspend fun leastUsedColor(): String {
+        val counts = tags.findAll().groupingBy { it.color.uppercase() }.eachCount()
+        return PALETTE.minBy { counts[it] ?: 0 }
+    }
 
     private companion object {
-        val PALETTE = listOf("#2F5BE0", "#E0642F", "#1F8A4C", "#A23FD1", "#D13B6E", "#0E8C9C", "#B88A00", "#5B6CFF")
+        val PALETTE = listOf("#2F5BE0", "#E0642F", "#1F8A4C", "#A23FD1", "#D13B6E", "#0E8C9C", "#B88A00", "#7A5230", "#5B6CFF", "#C2410C", "#4D7C0F", "#BE185D")
     }
 }
 

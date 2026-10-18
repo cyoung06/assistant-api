@@ -856,6 +856,13 @@
           }
         }, {
           "in" : "query",
+          "name" : "repeating",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
           "name" : "q",
           "required" : false,
           "schema" : {

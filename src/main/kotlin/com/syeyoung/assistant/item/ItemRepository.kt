@@ -36,6 +36,8 @@ data class ItemFilter(
     val scheduled: Boolean? = null,
     /** Only items whose deadline has passed and that are not done. */
     val overdueOnly: Boolean = false,
+    /** True: only occurrences of repeating events. False: leave them out. */
+    val repeating: Boolean? = null,
     val query: String? = null,
 )
 
@@ -77,6 +79,11 @@ class ItemRepository(private val db: DatabaseClient) {
             null -> {}
         }
         if (filter.overdueOnly) where += "done_at is null and by_date is not null and $DEADLINE_SQL <= :now"
+        when (filter.repeating) {
+            true -> where += "series_id is not null"
+            false -> where += "series_id is null"
+            null -> {}
+        }
         filter.query?.let { where += "(title ilike :q or notes ilike :q)" }
         after?.let { where += "(created_at, id) < (:afterCreatedAt, :afterId)" }
 
