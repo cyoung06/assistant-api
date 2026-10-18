@@ -74,6 +74,7 @@ abstract class ApiTestBase {
             registry.add("app.dav.url") { TestRadicale.url }
             registry.add("app.dav.username") { "tester" }
             registry.add("app.dav.password") { "x" }
+            registry.add("app.public-host") { "assistant.public.test" }
             registry.add("app.sources.mail.client-id") { "test-client" }
             registry.add("app.sources.mail.authority") { TestMail.oauthUrl }
             registry.add("app.sources.mail.imap-host") { "127.0.0.1" }
@@ -86,7 +87,7 @@ abstract class ApiTestBase {
     @BeforeEach
     fun setUp() {
         runBlocking {
-            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations, mail_accounts, ref_index, attachments").await()
+            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations, mail_accounts, ref_index, attachments, public_tokens").await()
             db.sql("alter sequence task_number restart").await()
             // Every test starts with an empty CalDAV home.
             dav.collections().forEach { dav.deleteCollection(it.href) }

@@ -192,6 +192,26 @@
         "required" : [ "title" ],
         "type" : "object"
       },
+      "CreateTokenRequest" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Created" : {
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "url" ],
+        "type" : "object"
+      },
       "DueDto" : {
         "properties" : {
           "date" : {
@@ -495,6 +515,39 @@
         "required" : [ "from", "messageId", "subject", "to" ],
         "type" : "object"
       },
+      "MailTaskRequest" : {
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "due" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/DueDto"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "labels" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "priority" : {
+            "enum" : [ "none", "urgent", "high", "medium", "low" ],
+            "type" : "string"
+          },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "title" ],
+        "type" : "object"
+      },
       "MoveReport" : {
         "properties" : {
           "labels" : {
@@ -515,6 +568,22 @@
           }
         },
         "required" : [ "labels", "moved", "projects", "skipped" ],
+        "type" : "object"
+      },
+      "NewToken" : {
+        "properties" : {
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "name", "token" ],
         "type" : "object"
       },
       "ProjectResponse" : {
@@ -602,6 +671,19 @@
           }
         },
         "required" : [ "description", "kind", "title" ],
+        "type" : "object"
+      },
+      "PublicProject" : {
+        "properties" : {
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "name" ],
         "type" : "object"
       },
       "Ref" : {
@@ -868,6 +950,27 @@
         "required" : [ "attachments", "blocked", "createdAt", "description", "id", "labelIds", "number", "overdue", "priority", "relations", "status", "subtasks", "subtasksDone", "title", "updatedAt", "version" ],
         "type" : "object"
       },
+      "TokenInfo" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lastUsed" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "createdAt", "id", "name" ],
+        "type" : "object"
+      },
       "UpdateCalendarRequest" : {
         "properties" : {
           "color" : {
@@ -1063,7 +1166,7 @@
     },
     "/api/v1/capture/analyze" : {
       "post" : {
-        "operationId" : "analyze",
+        "operationId" : "analyze_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1127,7 +1230,7 @@
         "tags" : [ "calendar-controller" ]
       },
       "post" : {
-        "operationId" : "create_1",
+        "operationId" : "create_2",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1173,7 +1276,7 @@
         "tags" : [ "calendar-controller" ]
       },
       "get" : {
-        "operationId" : "event",
+        "operationId" : "event_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -1601,6 +1704,211 @@
         "tags" : [ "task-controller" ]
       }
     },
+    "/api/v1/public-tokens" : {
+      "get" : {
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/TokenInfo"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "public-token-controller" ]
+      },
+      "post" : {
+        "operationId" : "create_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTokenRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/NewToken"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "public-token-controller" ]
+      }
+    },
+    "/api/v1/public-tokens/{id}" : {
+      "delete" : {
+        "operationId" : "revoke",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "public-token-controller" ]
+      }
+    },
+    "/api/v1/public/analyze" : {
+      "post" : {
+        "operationId" : "analyze",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Authorization",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AnalyzeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "public-controller" ]
+      }
+    },
+    "/api/v1/public/events" : {
+      "post" : {
+        "operationId" : "event",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Authorization",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateEventRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Created"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "public-controller" ]
+      }
+    },
+    "/api/v1/public/projects" : {
+      "get" : {
+        "operationId" : "projects_1",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Authorization",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/PublicProject"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "public-controller" ]
+      }
+    },
+    "/api/v1/public/tasks" : {
+      "post" : {
+        "operationId" : "task",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Authorization",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MailTaskRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Created"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "public-controller" ]
+      }
+    },
     "/api/v1/refs" : {
       "get" : {
         "operationId" : "search",
@@ -1719,7 +2027,7 @@
     },
     "/api/v1/sources" : {
       "get" : {
-        "operationId" : "list",
+        "operationId" : "list_1",
         "responses" : {
           "200" : {
             "content" : {
@@ -1890,7 +2198,7 @@
         "tags" : [ "task-controller" ]
       },
       "get" : {
-        "operationId" : "task",
+        "operationId" : "task_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",

@@ -16,6 +16,7 @@ spring:
 app:
   zone: Asia/Seoul
   public-url: ${PUBLIC_URL:http://localhost:5173}
+  public-host: ${PUBLIC_HOST:}
   sources:
     scheduler-enabled: ${SOURCES_SCHEDULER_ENABLED:true}
     plms:
