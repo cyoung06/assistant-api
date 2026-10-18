@@ -128,5 +128,10 @@ abstract class ApiTestBase {
             .exchange().expectStatus().isOk
             .expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
 
-    fun calendar(name: String, color: String = "#2F5BE0") = post("/api/v1/calendars", mapOf("name" to name, "color" to color))["id"] as String
+    /** Puts a raw iCalendar object into the assistant's calendar, as another CalDAV app would. */
+    fun putRaw(name: String, ics: String) = runBlocking {
+        val cal = ws.assistantCalendar()
+        dav.put(cal.href + name, ics.trimIndent().replace("\n", "\r\n") + "\r\n", null)
+        ws.invalidate()
+    }
 }

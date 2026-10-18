@@ -54,6 +54,8 @@ data class TaskResponse(
     val url: String?,
     /** Set when an exporter (e.g. PLMS) owns the title and deadline. */
     val source: String?,
+    /** In a source's calendar: title and deadline belong to the source and can't be changed here. */
+    val fixed: Boolean,
     val overdue: Boolean,
     val subtasks: Int,
     val subtasksDone: Int,
@@ -78,6 +80,8 @@ data class AgendaEntry(
     val done: Boolean,
     val overdue: Boolean,
     val repeats: Boolean,
+    /** In a source's calendar (or repeating): can't be moved here. */
+    val fixed: Boolean,
     /** A work session for this task. */
     val taskId: String? = null,
     val start: OffsetDateTime? = null,
@@ -88,11 +92,9 @@ data class AgendaEntry(
     val date: LocalDate? = null,
 )
 
-data class CreateCalendarRequest(val name: String, val color: String? = null)
 data class UpdateCalendarRequest(val name: String? = null, val color: String? = null)
 
 data class CreateTaskRequest(
-    val calendarId: String? = null,
     val title: String,
     val notes: String = "",
     val due: DueDto? = null,
@@ -101,7 +103,6 @@ data class CreateTaskRequest(
 )
 
 data class CreateEventRequest(
-    val calendarId: String? = null,
     val title: String,
     val notes: String = "",
     val start: OffsetDateTime? = null,
@@ -114,22 +115,28 @@ data class CreateEventRequest(
     val taskId: String? = null,
 )
 
+/** Moves an event: a timed one by start/end, an all-day one by startDate/endDate. */
+data class MoveEventRequest(
+    val start: OffsetDateTime? = null,
+    val end: OffsetDateTime? = null,
+    val startDate: LocalDate? = null,
+    val endDate: LocalDate? = null,
+)
+
 // ---- service ----------------------------------------------------------------------
 
 @Service
-class WorkspaceService(private val ws: Workspace, private val clock: Clock, private val mapper: ObjectMapper) {
+class WorkspaceService(
+    private val ws: Workspace,
+    private val sources: com.syeyoung.assistant.source.SourceRepository,
+    private val clock: Clock,
+    private val mapper: ObjectMapper,
+) {
     private val zone get() = ws.zone
 
     suspend fun calendars(): List<CalendarResponse> {
         val s = ws.snapshot()
         return s.calendars.sortedBy { it.name.lowercase() }.map { c -> CalendarResponse(c.id, c.name, c.color, s.tasks.count { it.calendarId == c.id && !it.done }) }
-    }
-
-    suspend fun createCalendar(req: CreateCalendarRequest): CalendarResponse {
-        val name = req.name.trim().ifEmpty { throw ValidationException("Name is required") }
-        if (ws.snapshot().calendars.any { it.name.equals(name, true) }) throw ConflictException("exists", "A calendar named '$name' already exists")
-        val c = ws.createCalendar(name, req.color?.let(::validColor))
-        return CalendarResponse(c.id, c.name, c.color, 0)
     }
 
     suspend fun updateCalendar(id: String, req: UpdateCalendarRequest): CalendarResponse {
@@ -138,18 +145,9 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
         return calendars().first { it.id == id }
     }
 
-    /** Only empty calendars can be deleted, so nothing disappears by accident. */
-    suspend fun deleteCalendar(id: String) {
-        val cal = calendar(id)
-        val s = ws.snapshot()
-        if (s.tasks.any { it.calendarId == id } || s.events.any { it.calendarId == id }) {
-            throw ConflictException("not_empty", "Move or delete what's in '${cal.name}' first")
-        }
-        ws.deleteCalendar(cal)
-    }
-
     suspend fun tasks(status: String, calendarId: String?, category: String?, hide: Set<String>, parentId: String?, q: String?): List<TaskResponse> {
         val s = ws.snapshot()
+        val fixed = sources.sourceCalendarIds()
         val hidden = hide.map { it.lowercase() }.toSet()
         return s.tasks.asSequence()
             .filter { status == "all" || (status == "done") == it.done }
@@ -158,25 +156,25 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
             .filter { parentId == null || it.parentUid == parentId }
             .filter { t -> hidden.isEmpty() || (calendarName(s, t.calendarId).lowercase() !in hidden && t.categories.none { it.lowercase() in hidden }) }
             .filter { t -> q.isNullOrBlank() || t.title.contains(q, true) || t.notes.contains(q, true) }
-            .map { render(s, it) }
+            .map { render(s, it, fixed) }
             .toList()
     }
 
-    suspend fun task(id: String): TaskResponse = ws.snapshot().let { s -> render(s, s.tasks.find { it.uid == id } ?: throw NotFoundException("Task", id)) }
+    suspend fun task(id: String): TaskResponse =
+        ws.snapshot().let { s -> render(s, s.tasks.find { it.uid == id } ?: throw NotFoundException("Task", id), sources.sourceCalendarIds()) }
 
     suspend fun createTask(req: CreateTaskRequest): TaskResponse {
         val title = req.title.trim().ifEmpty { throw ValidationException("Title is required") }
         val s = ws.snapshot()
         val parent = req.parentId?.let { p -> s.tasks.find { it.uid == p } ?: throw ValidationException("No task $p") }
-        val calendarId = req.calendarId ?: parent?.calendarId ?: defaultCalendar(s)
-        calendar(calendarId)
-        val t = ws.createTask(calendarId, Workspace.TaskFields(title, req.notes, req.due?.let { Due(it.date, it.time) }, categories = req.categories, parentUid = req.parentId))
+        val t = ws.createTask(ws.assistantCalendar().id, Workspace.TaskFields(title, req.notes, req.due?.let { Due(it.date, it.time) }, categories = req.categories, parentUid = req.parentId))
         return task(t.uid)
     }
 
     /**
-     * Merge patch of a task. Supported: title, notes, due, done, categories, parentId, calendarId.
-     * Completing a task completes its sub-tasks. [etag] guards against overwriting another client's change.
+     * Merge patch of a task. Supported: title, notes, due, done, categories, parentId. Title and due of
+     * a task in a source's calendar belong to the source. Completing a task completes its sub-tasks.
+     * [etag] guards against overwriting another client's change.
      */
     suspend fun updateTask(id: String, patch: JsonNode, etag: String?): TaskResponse {
         if (!patch.isObject) throw ValidationException("Patch body must be a JSON object")
@@ -184,8 +182,9 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
         val current = s.tasks.find { it.uid == id } ?: throw NotFoundException("Task", id)
         if (etag != null && current.etag != null && etag != current.etag) throw ConflictException("changed", "This task was changed elsewhere; reload and try again")
         var f = ws.fieldsOf(current)
-        var moveTo: String? = null
+        val isFixed = current.calendarId in sources.sourceCalendarIds()
         for ((name, value) in patch.properties()) {
+            if (isFixed && name in setOf("title", "due")) throw ConflictException("fixed", "This task comes from ${current.sourceRef?.substringBefore(':')?.uppercase() ?: "a source"}; its $name is set there")
             val v = value.takeUnless { it.isNull }
             f = when (name) {
                 "title" -> f.copy(title = v?.asString()?.trim()?.ifEmpty { null } ?: throw ValidationException("Title is required"))
@@ -194,7 +193,6 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
                 "done" -> f.copy(done = v?.asBoolean() ?: false)
                 "categories" -> f.copy(categories = v?.let { n -> (0 until n.size()).map { n.get(it).asString() } }.orEmpty())
                 "parentId" -> f.copy(parentUid = v?.asString()?.also { p -> if (p == id || s.tasks.none { it.uid == p }) throw ValidationException("Invalid parent") })
-                "calendarId" -> { moveTo = v?.asString()?.also { calendar(it) }; f }
                 else -> throw ValidationException("Unknown or read-only field '$name'")
             }
         }
@@ -202,10 +200,6 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
             ws.updateTask(current) { f }
             if (!current.done && f.done) {
                 for (child in descendants(s, id)) if (!child.done) ws.findTask(child.uid)?.let { c -> ws.updateTask(c) { it.copy(done = true) } }
-            }
-            moveTo?.takeIf { it != current.calendarId }?.let { target ->
-                val fresh = ws.findTask(id)!!
-                ws.move(fresh.href, fresh.etag, fresh.uid, target)
             }
         } catch (e: DavConflictException) {
             throw ConflictException("changed", "This task was changed elsewhere; reload and try again")
@@ -226,9 +220,8 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
     suspend fun createEvent(req: CreateEventRequest): AgendaEntry {
         val title = req.title.trim().ifEmpty { throw ValidationException("Title is required") }
         val s = ws.snapshot()
-        val task = req.taskId?.let { id -> s.tasks.find { it.uid == id } ?: throw ValidationException("No task $id") }
-        val calendarId = req.calendarId ?: task?.calendarId ?: defaultCalendar(s)
-        calendar(calendarId)
+        req.taskId?.let { id -> s.tasks.find { it.uid == id } ?: throw ValidationException("No task $id") }
+        val calendarId = ws.assistantCalendar().id
         val fields = when {
             req.startDate != null -> Workspace.EventFields(title, req.notes, startDate = req.startDate, endDate = req.endDate ?: req.startDate, categories = req.categories, relatedUid = req.taskId)
             req.start != null && req.end != null && req.end.isAfter(req.start) ->
@@ -242,7 +235,25 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
 
     suspend fun deleteEvent(id: String) {
         val e = ws.findEvent(id) ?: throw NotFoundException("Event", id)
+        if (e.calendarId in sources.sourceCalendarIds()) throw ConflictException("fixed", "This event comes from a source")
         ws.delete(e.href, e.etag)
+    }
+
+    /** Moves or resizes a one-off event in the assistant's calendar. */
+    suspend fun moveEvent(id: String, req: MoveEventRequest): AgendaEntry {
+        val e = ws.findEvent(id) ?: throw NotFoundException("Event", id)
+        if (e.calendarId in sources.sourceCalendarIds()) throw ConflictException("fixed", "This event comes from a source")
+        if (e.repeats) throw ConflictException("repeats", "Repeating events are changed in a calendar app")
+        ws.updateEvent(e) { f ->
+            when {
+                req.startDate != null -> f.copy(start = null, end = null, startDate = req.startDate, endDate = req.endDate ?: req.startDate)
+                req.start != null && req.end != null && req.end.isAfter(req.start) -> f.copy(start = req.start.toInstant(), end = req.end.toInstant(), startDate = null, endDate = null)
+                else -> throw ValidationException("Give start and end (end after start), or startDate")
+            }
+        }
+        val moved = ws.findEvent(id)!!
+        val date = moved.startDate ?: moved.start!!.atZone(zone).toLocalDate()
+        return agenda(date, date, emptySet()).first { it.id == id }
     }
 
     /** Event occurrences and task deadlines for days [from]..[to] (inclusive). */
@@ -250,6 +261,7 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
         if (to < from) throw ValidationException("'to' must not be before 'from'")
         if (ChronoUnit.DAYS.between(from, to) > 400) throw ValidationException("Range is longer than 400 days")
         val s = ws.snapshot()
+        val fixed = sources.sourceCalendarIds()
         val hidden = hide.map { it.lowercase() }.toSet()
         fun visible(calendarId: String, categories: List<String>) =
             hidden.isEmpty() || (calendarName(s, calendarId).lowercase() !in hidden && categories.none { it.lowercase() in hidden })
@@ -261,7 +273,8 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
                 kind = if (o.startDate != null) EntryKind.ALL_DAY_BLOCK else EntryKind.BLOCK,
                 title = o.event.title.ifBlank { o.event.relatedUid?.let { r -> s.tasks.find { it.uid == r }?.title }.orEmpty() },
                 color = cal?.color, calendarName = cal?.name.orEmpty(), categories = o.event.categories,
-                done = false, overdue = false, repeats = o.event.repeats, taskId = o.event.relatedUid,
+                done = false, overdue = false, repeats = o.event.repeats, fixed = o.event.calendarId in fixed || o.event.repeats,
+                taskId = o.event.relatedUid,
                 start = o.start?.atZone(zone)?.toOffsetDateTime(), end = o.end?.atZone(zone)?.toOffsetDateTime(),
                 startDate = o.startDate, endDate = o.endDate,
             )
@@ -270,7 +283,7 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
             val cal = s.calendars.find { it.id == t.calendarId }
             val base = AgendaEntry(
                 id = t.uid, kind = EntryKind.DEADLINE, title = t.title, color = cal?.color, calendarName = cal?.name.orEmpty(),
-                categories = t.categories, done = t.done, overdue = isOverdue(t, now), repeats = false,
+                categories = t.categories, done = t.done, overdue = isOverdue(t, now), repeats = false, fixed = t.calendarId in fixed,
             )
             t.due!!.time?.let { base.copy(due = t.due.date.atTime(it).atZone(zone).toOffsetDateTime()) }
                 ?: base.copy(kind = EntryKind.ALL_DAY_DEADLINE, date = t.due.date)
@@ -278,7 +291,7 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
         return (events + deadlines).sortedBy { it.start ?: it.due ?: (it.startDate ?: it.date)!!.atStartOfDay(zone).toOffsetDateTime() }
     }
 
-    private fun render(s: Snapshot, t: Task): TaskResponse {
+    private fun render(s: Snapshot, t: Task, fixedCalendars: Set<String>): TaskResponse {
         val cal = s.calendars.find { it.id == t.calendarId }
         val subs = descendants(s, t.uid)
         val uids = (subs.map { it.uid } + t.uid).toSet()
@@ -289,7 +302,7 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
         return TaskResponse(
             id = t.uid, calendarId = t.calendarId, calendarName = cal?.name.orEmpty(), color = cal?.color,
             title = t.title, notes = t.notes, due = t.due?.let { DueDto(it.date, it.time) }, done = t.done, doneAt = t.doneAt,
-            categories = t.categories, parentId = t.parentUid, url = t.url, source = t.sourceRef?.substringBefore(':'),
+            categories = t.categories, parentId = t.parentUid, url = t.url, source = t.sourceRef?.substringBefore(':'), fixed = t.calendarId in fixedCalendars,
             overdue = isOverdue(t, now), subtasks = subs.size, subtasksDone = subs.count { it.done },
             minutesSpent = spent, minutesPlanned = planned, etag = t.etag,
         )
@@ -317,9 +330,6 @@ class WorkspaceService(private val ws: Workspace, private val clock: Clock, priv
 
     private suspend fun calendar(id: String): Cal = ws.snapshot().calendars.find { it.id == id } ?: throw NotFoundException("Calendar", id)
 
-    private suspend fun defaultCalendar(s: Snapshot): String =
-        (s.calendars.find { it.name == "Inbox" } ?: ws.createCalendar("Inbox", "#6B7280", slug = "inbox")).id
-
     private fun validColor(c: String): String {
         if (!Regex("^#[0-9A-Fa-f]{6}$").matches(c)) throw ValidationException("Color must look like #3B82F6")
         return c.uppercase()
@@ -335,16 +345,8 @@ class WorkspaceController(private val service: WorkspaceService) {
     @GetMapping("/calendars")
     suspend fun calendars(): List<CalendarResponse> = service.calendars()
 
-    @PostMapping("/calendars")
-    @ResponseStatus(HttpStatus.CREATED)
-    suspend fun createCalendar(@RequestBody req: CreateCalendarRequest): CalendarResponse = service.createCalendar(req)
-
     @PatchMapping("/calendars/{id}")
     suspend fun updateCalendar(@PathVariable id: String, @RequestBody req: UpdateCalendarRequest): CalendarResponse = service.updateCalendar(id, req)
-
-    @DeleteMapping("/calendars/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun deleteCalendar(@PathVariable id: String) = service.deleteCalendar(id)
 
     /** Tasks. `hide` leaves out tasks whose calendar or a category has one of these names. */
     @GetMapping("/tasks")
@@ -381,6 +383,9 @@ class WorkspaceController(private val service: WorkspaceService) {
     @PostMapping("/events")
     @ResponseStatus(HttpStatus.CREATED)
     suspend fun createEvent(@RequestBody req: CreateEventRequest): AgendaEntry = service.createEvent(req)
+
+    @PatchMapping("/events/{id}")
+    suspend fun moveEvent(@PathVariable id: String, @RequestBody req: MoveEventRequest): AgendaEntry = service.moveEvent(id, req)
 
     @DeleteMapping("/events/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)

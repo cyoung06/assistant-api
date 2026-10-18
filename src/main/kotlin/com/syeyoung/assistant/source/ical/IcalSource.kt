@@ -54,7 +54,8 @@ class IcalSource(props: AppProperties) : DataSource {
             ).await()
             if (response.statusCode() != 200) throw IllegalStateException("${sub.name}: feed returned HTTP ${response.statusCode()}")
             val tag = SourceTag("ical:${sub.key}", sub.tag)
-            IcalParser.parse(response.body(), zone).flatMap { toRecords(sub.key, it, tag, from, to, zone) }
+            val calendar = SourceTag("ical:${sub.key}", sub.name)
+            IcalParser.parse(response.body(), zone).flatMap { toRecords(sub.key, it, tag, from, to, zone).map { r -> r.copy(calendar = calendar) } }
         }
         return SourceSnapshot(records, deleteMissing = true)
     }

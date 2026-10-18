@@ -19,10 +19,11 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Applies a source's snapshot to the CalDAV workspace.
  *
- * Ownership: the source owns an object's title, deadline or time, link (and notes, when it sends
- * them). Everything else — done, extra categories, sub-tasks, alarms a client added — belongs to the
- * user and is kept. Objects the user deleted are not recreated. The first tag picks the calendar
- * (created on first use, then remembered by the source's key); the others become CATEGORIES.
+ * Every source writes only into its own calendar(s) — one calendar is one source — so whether
+ * something is the user's or a source's follows from where it lives. Tags become CATEGORIES.
+ * Ownership within a source's items: the source owns title, deadline or time, link (and notes, when
+ * it sends them); done, extra categories, sub-tasks and anything a client added stay the user's.
+ * Objects the user deleted are not recreated.
  */
 @Component
 class SourceApplier(
@@ -30,19 +31,20 @@ class SourceApplier(
     private val sources: SourceRepository,
     private val props: AppProperties,
 ) {
-    suspend fun apply(type: SourceType, snapshot: SourceSnapshot, now: Instant): SyncReport {
+    suspend fun apply(type: SourceType, displayName: String, snapshot: SourceSnapshot, now: Instant): SyncReport {
         var report = SyncReport()
         val prefix = "${type.wire}:"
         val s = ws.snapshot()
         val tasks = s.tasks.filter { it.sourceRef?.startsWith(prefix) == true }.associateBy { it.sourceRef!! }
         val events = s.events.filter { it.sourceRef?.startsWith(prefix) == true }.associateBy { it.sourceRef!! }
         val known = sources.refs(type)
-        val calendarFor = mutableMapOf<String?, String>()
+        val calendarFor = mutableMapOf<String, String>()
 
         for (record in snapshot.records) {
             val ref = prefix + record.ref
-            val calendarId = calendarFor.getOrPut(record.tags.firstOrNull()?.key) { resolveCalendar(type, record.tags.firstOrNull()) }
-            val categories = record.tags.drop(1).map { it.name }
+            val target = record.calendar ?: SourceTag(type.wire, displayName)
+            val calendarId = calendarFor.getOrPut(target.key) { resolveCalendar(type, target) }
+            val categories = record.tags.map { it.name }
             val isEvent = record.atStart != null || record.atStartDate != null
             report = if (isEvent) {
                 val existing = events[ref]
@@ -104,22 +106,14 @@ class SourceApplier(
     private fun sameEvent(e: Event, f: Workspace.EventFields) =
         e.title == f.title && e.notes == f.notes && e.start == f.start && e.end == f.end && e.startDate == f.startDate && e.endDate == f.endDate && e.url == f.url
 
-    /**
-     * The calendar for a source grouping: the remembered one, else an existing calendar with the same
-     * name, else a new one. A remembered calendar the user deleted isn't recreated; its items go to the inbox.
-     */
-    private suspend fun resolveCalendar(type: SourceType, tag: SourceTag?): String {
+    /** The source's calendar for [target]: the remembered one, or a new one (also when it was deleted). */
+    private suspend fun resolveCalendar(type: SourceType, target: SourceTag): String {
         val s = ws.snapshot()
-        if (tag == null) return inbox()
-        sources.mappedCalendar(type, tag.key)?.let { mapped -> return s.calendars.find { it.id == mapped }?.id ?: inbox() }
-        val cal = s.calendars.find { it.name.equals(tag.name, ignoreCase = true) } ?: ws.createCalendar(tag.name, leastUsedColor(s.calendars))
-        sources.mapCalendar(type, tag.key, cal.id)
+        sources.mappedCalendar(type, target.key)?.let { mapped -> s.calendars.find { it.id == mapped }?.let { return it.id } }
+        val slug = "src-" + target.key.replace(Regex("[^A-Za-z0-9-]"), "-")
+        val cal = s.calendars.find { it.id == slug } ?: ws.createCalendar(target.name, leastUsedColor(s.calendars), slug = slug)
+        sources.mapCalendar(type, target.key, cal.id)
         return cal.id
-    }
-
-    private suspend fun inbox(): String {
-        val s = ws.snapshot()
-        return (s.calendars.find { it.name == INBOX } ?: ws.createCalendar(INBOX, "#6B7280", slug = "inbox")).id
     }
 
     private fun leastUsedColor(calendars: List<Cal>): String {
@@ -128,7 +122,6 @@ class SourceApplier(
     }
 
     companion object {
-        const val INBOX = "Inbox"
         val PALETTE = listOf("#2F5BE0", "#E0642F", "#1F8A4C", "#A23FD1", "#D13B6E", "#0E8C9C", "#B88A00", "#7A5230", "#5B6CFF", "#C2410C", "#4D7C0F", "#BE185D")
     }
 }
@@ -184,7 +177,7 @@ class SourceSync(
             val now = Instant.now(clock)
             try {
                 val snapshot = source.fetch(now)
-                val report = applier.apply(source.type, snapshot, now)
+                val report = applier.apply(source.type, source.displayName, snapshot, now)
                 repository.recordSuccess(source.type, now, report)
                 log.info("Synced {}: {}", source.type.wire, report)
             } catch (e: CancellationException) {

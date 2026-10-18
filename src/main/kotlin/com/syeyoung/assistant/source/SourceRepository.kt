@@ -63,6 +63,10 @@ class SourceRepository(private val db: DatabaseClient, private val mapper: Objec
             .bind("type", type.wire).bind("ref", ref).bind("uid", uid).fetch().awaitRowsUpdated()
     }
 
+    /** Calendars that belong to a source (everything else is the assistant's or the user's own). */
+    suspend fun sourceCalendarIds(): Set<String> =
+        db.sql("select calendar_id from source_calendars").map { r -> r.req<String>("calendar_id") }.flow().toList().toSet()
+
     suspend fun mappedCalendar(type: SourceType, key: String): String? =
         db.sql("select calendar_id from source_calendars where source_type = :type and external_key = :key")
             .bind("type", type.wire).bind("key", key).map { r -> r.req<String>("calendar_id") }.awaitOneOrNull()

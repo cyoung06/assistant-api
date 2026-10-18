@@ -13,13 +13,12 @@ class QuickAddTest : ApiTestBase() {
             .expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
 
     @Test
-    fun `deadlines become tasks, timed things become events, and calendar names are matched`() {
-        val stats = calendar("확률및통계")
+    fun `deadlines become tasks, timed things become events, and existing categories are matched`() {
+        post("/api/v1/tasks", mapOf("title" to "HW6", "categories" to listOf("확률및통계")))
         extractor.next = { LlmDraft(title = "HW7", by = LlmBy("2026-10-27", "19:00"), tags = listOf("확률및통계", "assignment")) }
         val task = parse("확통 HW7 화요일 7시까지")["draft"] as Map<*, *>
         assertThat(task["kind"]).isEqualTo("task")
-        assertThat(task["calendarId"]).isEqualTo(stats)
-        assertThat(task["categories"]).isEqualTo(listOf("assignment"))
+        assertThat(task["categories"]).isEqualTo(listOf("확률및통계", "assignment"))
         assertThat(task["due"]).isEqualTo(mapOf("date" to "2026-10-27", "time" to "19:00:00"))
 
         extractor.next = { LlmDraft(title = "교수님 미팅", at = LlmAt(allDay = false, start = "2026-10-22T15:00")) }

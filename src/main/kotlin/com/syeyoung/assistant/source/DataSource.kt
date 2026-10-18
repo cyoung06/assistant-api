@@ -50,11 +50,13 @@ data class SourceRecord(
     val atEndDate: LocalDate? = null,
     val notes: String? = null,
     val url: String? = null,
-    /** Tags to attach when the item is created; the first one becomes the main tag. */
+    /** Categories to attach when the item is created (e.g. the course, "assignment"). */
     val tags: List<SourceTag> = emptyList(),
+    /** Which of the source's calendars it goes in; null for the source's single calendar. */
+    val calendar: SourceTag? = null,
 )
 
-/** A tag the source wants, identified by the source's own key (e.g. a course ID). */
+/** A category or calendar the source wants, identified by the source's own key (e.g. a course ID). */
 data class SourceTag(val key: String, val name: String)
 
 data class SyncReport(

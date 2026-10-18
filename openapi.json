@@ -34,6 +34,9 @@
             "format" : "date",
             "type" : [ "string", "null" ]
           },
+          "fixed" : {
+            "type" : "boolean"
+          },
           "id" : {
             "type" : "string"
           },
@@ -62,7 +65,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "calendarName", "categories", "done", "id", "kind", "overdue", "repeats", "title" ],
+        "required" : [ "calendarName", "categories", "done", "fixed", "id", "kind", "overdue", "repeats", "title" ],
         "type" : "object"
       },
       "CalendarResponse" : {
@@ -84,23 +87,8 @@
         "required" : [ "id", "name", "openTasks" ],
         "type" : "object"
       },
-      "CreateCalendarRequest" : {
-        "properties" : {
-          "color" : {
-            "type" : [ "string", "null" ]
-          },
-          "name" : {
-            "type" : "string"
-          }
-        },
-        "required" : [ "name" ],
-        "type" : "object"
-      },
       "CreateEventRequest" : {
         "properties" : {
-          "calendarId" : {
-            "type" : [ "string", "null" ]
-          },
           "categories" : {
             "items" : {
               "type" : "string"
@@ -138,9 +126,6 @@
       },
       "CreateTaskRequest" : {
         "properties" : {
-          "calendarId" : {
-            "type" : [ "string", "null" ]
-          },
           "categories" : {
             "items" : {
               "type" : "string"
@@ -273,37 +258,29 @@
         },
         "type" : "object"
       },
-      "MigrationReport" : {
+      "MoveEventRequest" : {
         "properties" : {
-          "calendars" : {
-            "format" : "int32",
-            "type" : "integer"
+          "end" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
           },
-          "events" : {
-            "format" : "int32",
-            "type" : "integer"
+          "endDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
           },
-          "series" : {
-            "format" : "int32",
-            "type" : "integer"
+          "start" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
           },
-          "skipped" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "tasks" : {
-            "format" : "int32",
-            "type" : "integer"
+          "startDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "calendars", "events", "series", "skipped", "tasks" ],
         "type" : "object"
       },
       "QuickAddDraft" : {
         "properties" : {
-          "calendarId" : {
-            "type" : [ "string", "null" ]
-          },
           "categories" : {
             "items" : {
               "type" : "string"
@@ -365,6 +342,28 @@
           }
         },
         "required" : [ "draft", "parsed" ],
+        "type" : "object"
+      },
+      "RestructureReport" : {
+        "properties" : {
+          "calendarsRemoved" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "feedEventsDropped" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "movedToAssistant" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "movedToPlms" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "calendarsRemoved", "feedEventsDropped", "movedToAssistant", "movedToPlms" ],
         "type" : "object"
       },
       "SourceStatus" : {
@@ -471,6 +470,9 @@
           "etag" : {
             "type" : [ "string", "null" ]
           },
+          "fixed" : {
+            "type" : "boolean"
+          },
           "id" : {
             "type" : "string"
           },
@@ -509,7 +511,7 @@
             "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "calendarId", "calendarName", "categories", "done", "id", "minutesPlanned", "minutesSpent", "notes", "overdue", "subtasks", "subtasksDone", "title" ],
+        "required" : [ "calendarId", "calendarName", "categories", "done", "fixed", "id", "minutesPlanned", "minutesSpent", "notes", "overdue", "subtasks", "subtasksDone", "title" ],
         "type" : "object"
       },
       "UpdateCalendarRequest" : {
@@ -531,22 +533,22 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
-    "/api/v1/admin/migrate-to-dav" : {
+    "/api/v1/admin/restructure" : {
       "post" : {
-        "operationId" : "migrate",
+        "operationId" : "run",
         "responses" : {
           "200" : {
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/MigrationReport"
+                  "$ref" : "#/components/schemas/RestructureReport"
                 }
               }
             },
             "description" : "OK"
           }
         },
-        "tags" : [ "migration-controller" ]
+        "tags" : [ "restructure-controller" ]
       }
     },
     "/api/v1/agenda" : {
@@ -616,53 +618,9 @@
           }
         },
         "tags" : [ "workspace-controller" ]
-      },
-      "post" : {
-        "operationId" : "createCalendar",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/CreateCalendarRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "201" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/CalendarResponse"
-                }
-              }
-            },
-            "description" : "Created"
-          }
-        },
-        "tags" : [ "workspace-controller" ]
       }
     },
     "/api/v1/calendars/{id}" : {
-      "delete" : {
-        "operationId" : "deleteCalendar",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "id",
-          "required" : true,
-          "schema" : {
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "204" : {
-            "content" : { },
-            "description" : "No Content"
-          }
-        },
-        "tags" : [ "workspace-controller" ]
-      },
       "patch" : {
         "operationId" : "updateCalendar",
         "parameters" : [ {
@@ -741,6 +699,40 @@
           "204" : {
             "content" : { },
             "description" : "No Content"
+          }
+        },
+        "tags" : [ "workspace-controller" ]
+      },
+      "patch" : {
+        "operationId" : "moveEvent",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MoveEventRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgendaEntry"
+                }
+              }
+            },
+            "description" : "OK"
           }
         },
         "tags" : [ "workspace-controller" ]

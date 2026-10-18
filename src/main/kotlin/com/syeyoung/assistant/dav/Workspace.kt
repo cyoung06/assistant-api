@@ -311,6 +311,10 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         invalidate()
     }
 
+    /** The assistant's own calendar: where everything created through the app goes. */
+    suspend fun assistantCalendar(): Cal =
+        snapshot().calendars.find { it.id == ASSISTANT_SLUG } ?: createCalendar("Assistant", "#2F5BE0", slug = ASSISTANT_SLUG)
+
     suspend fun findTask(uid: String): Task? = snapshot().tasks.find { it.uid == uid }
     suspend fun findEvent(uid: String): Event? = snapshot().events.find { it.uid == uid }
 
@@ -457,6 +461,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
     companion object {
         /** Our own property marking an exporter's reference; other clients keep it untouched. */
         const val SOURCE_PROP = "X-ASSISTANT-SOURCE"
+        const val ASSISTANT_SLUG = "assistant"
         private const val CACHE_SECONDS = 15L
         private const val SPAN_SLACK = 31L
         private val DATE = DateTimeFormatter.BASIC_ISO_DATE

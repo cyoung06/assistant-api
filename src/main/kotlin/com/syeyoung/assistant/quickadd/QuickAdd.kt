@@ -36,8 +36,6 @@ data class QuickAddDraft(
     val end: OffsetDateTime? = null,
     val startDate: LocalDate? = null,
     val endDate: LocalDate? = null,
-    /** A calendar whose name the model matched, else null (the inbox). */
-    val calendarId: String? = null,
     val categories: List<String> = emptyList(),
 )
 
@@ -62,9 +60,10 @@ class QuickAddService(
         val fallback = QuickAddResult(parsed = false, draft = QuickAddDraft(kind = "task", title = input))
         if (!extractor.configured) return fallback
 
-        val calendars = ws.snapshot().calendars
+        // Categories already in use (courses, "assignment", …) so the model reuses them.
+        val known = ws.snapshot().let { s -> (s.tasks.flatMap { it.categories } + s.events.flatMap { it.categories }).distinct() }
         val draft = try {
-            extractor.extract(instructions(calendars.map { it.name }), input)
+            extractor.extract(instructions(known), input)
         } catch (e: TimeoutCancellationException) {
             log.warn("Quick add LLM call timed out")
             return fallback
@@ -75,12 +74,11 @@ class QuickAddService(
             return fallback
         }
 
-        // A tag naming a calendar picks it; the rest become categories.
-        val calendar = draft.tags.firstNotNullOfOrNull { t -> calendars.find { it.name.equals(t, true) } }
-        val categories = draft.tags.filter { t -> calendar == null || !calendar.name.equals(t, true) }.distinct()
+        // Match the spelling of categories already in use.
+        val categories = draft.tags.map { t -> known.find { it.equals(t, true) } ?: t }.distinct()
         val by = draft.by?.let(::toBy)
         val at = draft.at?.let(::toAt)
-        val base = QuickAddDraft(kind = "task", title = draft.title.ifBlank { input }, notes = draft.notes, calendarId = calendar?.id, categories = categories)
+        val base = QuickAddDraft(kind = "task", title = draft.title.ifBlank { input }, notes = draft.notes, categories = categories)
         return QuickAddResult(
             parsed = true,
             draft = if (by == null && at != null) {
@@ -134,7 +132,7 @@ class QuickAddService(
               If no end is given, set end to null.
             - An item can have both by and at, or neither.
             - Resolve relative dates ("fri", "tomorrow", "다음주 월요일") to the next matching date on or after today.
-            - tags: at most one calendar name from this list that clearly applies (e.g. the course), plus short category words such as "assignment", "exam", "meeting" when obvious; otherwise []: ${tagNames.joinToString(", ").ifEmpty { "(none)" }}
+            - tags: categories that clearly apply, preferring these existing ones (e.g. the course): ${tagNames.joinToString(", ").ifEmpty { "(none)" }}; plus short words like "assignment", "exam", "meeting" when obvious; otherwise []
             - notes: anything useful that doesn't fit the other fields, otherwise "".
         """.trimIndent()
     }
