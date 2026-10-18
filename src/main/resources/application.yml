@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: assistant-api
+  r2dbc:
+    url: ${DB_R2DBC_URL:r2dbc:postgresql://localhost:5432/assistant}
+    username: ${DB_USERNAME:assistant}
+    password: ${DB_PASSWORD:assistant}
+  flyway:
+    url: ${DB_JDBC_URL:jdbc:postgresql://localhost:5432/assistant}
+    user: ${DB_USERNAME:assistant}
+    password: ${DB_PASSWORD:assistant}
+  webflux:
+    problemdetails:
+      enabled: true
+
+app:
+  zone: Asia/Seoul
+  auth:
+    # Set to false only for local development.
+    enabled: ${AUTH_ENABLED:true}
+    # Only this Google account may use the API.
+    owner-email: ${AUTH_OWNER_EMAIL:}
+    # Google OAuth client IDs whose ID tokens are accepted (web, Android, macOS).
+    google-client-ids: ${AUTH_GOOGLE_CLIENT_IDS:}
+  llm:
+    base-url: ${LLM_BASE_URL:https://api.openai.com}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:gpt-6-luna}
+    timeout: ${LLM_TIMEOUT:5s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
