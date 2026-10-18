@@ -3,10 +3,7 @@ package com.syeyoung.assistant.ical
 import com.syeyoung.assistant.common.NotFoundException
 import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
-import com.syeyoung.assistant.item.ItemRepository
-import com.syeyoung.assistant.item.ItemResponse
-import com.syeyoung.assistant.item.ItemViews
-import com.syeyoung.assistant.item.SourceType
+import com.syeyoung.assistant.dav.Workspace
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -40,8 +37,7 @@ data class FeedInfo(
 @Service
 class FeedService(
     private val db: DatabaseClient,
-    private val items: ItemRepository,
-    private val views: ItemViews,
+    private val ws: Workspace,
     private val clock: Clock,
     private val props: AppProperties,
 ) {
@@ -61,36 +57,27 @@ class FeedService(
             .bind("t", token).map { _ -> 1 }.awaitOneOrNull() != null
         if (!valid) throw NotFoundException("Feed", "")
         val today = LocalDate.now(clock)
-        val from = today.minusDays(PAST_DAYS)
-        val to = today.plusDays(FUTURE_DAYS)
-        val zone = props.zone
-        val list = items.inRange(from.atStartOfDay(zone).toInstant(), to.atStartOfDay(zone).toInstant(), from, to)
-            // Items that came from another calendar are already in that calendar.
-            .filter { it.fields.sourceType != SourceType.ICAL }
-        return IcalWriter.write("Assistant", views.render(list).flatMap(::toEvents))
-    }
-
-    private fun toEvents(item: ItemResponse): List<IcalEvent> {
-        val title = item.derived.displayTitle.ifBlank { "Untitled" }
-        val description = listOfNotNull(item.notes.takeIf { it.isNotBlank() }, item.source.url).joinToString("\n\n")
-        val base = IcalEvent(uid = "${item.id}@assistant", summary = title, description = description, url = item.source.url, stamp = item.updatedAt)
-        val events = mutableListOf<IcalEvent>()
-        item.at?.let { at ->
-            events += if (at.allDay) {
-                base.copy(startDate = at.startDate, endDate = at.endDate!!.plusDays(1))
-            } else {
-                base.copy(start = at.start!!.toInstant(), end = at.end!!.toInstant())
+        val s = ws.snapshot()
+        val events = ws.occurrences(s, today.minusDays(PAST_DAYS), today.plusDays(FUTURE_DAYS))
+            // Events that came from another calendar feed are already in that calendar.
+            .filter { it.event.sourceRef?.startsWith("ical:") != true }
+            .map { o ->
+                val day = o.startDate ?: o.start!!.atZone(props.zone).toLocalDate()
+                IcalEvent(
+                    uid = if (o.event.repeats) "${o.event.uid}-$day" else o.event.uid,
+                    summary = o.event.title.ifBlank { "Untitled" }, description = o.event.notes, url = o.event.url,
+                    start = o.start, end = o.end, startDate = o.startDate, endDate = o.endDate?.plusDays(1),
+                )
             }
+        // Open deadlines as short events (calendar subscriptions ignore VTODO).
+        val deadlines = s.tasks.filter { !it.done && it.due != null }.map { t ->
+            val base = IcalEvent(uid = "${t.uid}-due", summary = "Due: ${t.title}", description = t.notes, url = t.url)
+            t.due!!.time?.let { time ->
+                val at = t.due.date.atTime(time).atZone(props.zone).toInstant()
+                base.copy(start = at, end = at.plus(DEADLINE_LENGTH))
+            } ?: base.copy(startDate = t.due.date, endDate = t.due.date.plusDays(1))
         }
-        // Done deadlines are dropped; events stay, since they still happened.
-        if (item.by != null && item.doneAt == null) {
-            val due = base.copy(uid = "${item.id}-due@assistant", summary = "Due: $title")
-            events += item.by.time?.let { time ->
-                val at = item.by.date.atTime(time).atZone(props.zone).toInstant()
-                due.copy(start = at, end = at.plus(DEADLINE_LENGTH))
-            } ?: due.copy(startDate = item.by.date, endDate = item.by.date.plusDays(1))
-        }
-        return events
+        return IcalWriter.write("Assistant", events + deadlines)
     }
 
     private suspend fun active(): FeedInfo? =

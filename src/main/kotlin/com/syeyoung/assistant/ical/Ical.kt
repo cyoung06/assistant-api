@@ -73,14 +73,15 @@ object IcalWriter {
     private fun fold(text: String, out: StringBuilder) {
         var used = 0
         var limit = 75
-        for (ch in text) {
-            val size = ch.toString().toByteArray(Charsets.UTF_8).size
+        // Code points, so a character outside the BMP (emoji) is never split across a fold.
+        text.codePoints().forEach { cp ->
+            val size = String(Character.toChars(cp)).toByteArray(Charsets.UTF_8).size
             if (used + size > limit) {
                 out.append("\r\n ")
                 used = 0
                 limit = 74 // the leading space counts
             }
-            out.append(ch)
+            out.appendCodePoint(cp)
             used += size
         }
         out.append("\r\n")

@@ -1,6 +1,6 @@
 package com.syeyoung.assistant.source
 
-import com.syeyoung.assistant.item.SourceType
+import com.syeyoung.assistant.source.SourceType
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate

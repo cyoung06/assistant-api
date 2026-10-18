@@ -1,9 +1,9 @@
 package com.syeyoung.assistant
 
 import com.syeyoung.assistant.common.ValidationException
-import com.syeyoung.assistant.series.Freq
-import com.syeyoung.assistant.series.Recurrence
-import com.syeyoung.assistant.series.RepeatRule
+import com.syeyoung.assistant.ical.Freq
+import com.syeyoung.assistant.ical.Recurrence
+import com.syeyoung.assistant.ical.RepeatRule
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test

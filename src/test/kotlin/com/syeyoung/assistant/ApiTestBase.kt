@@ -1,5 +1,7 @@
 package com.syeyoung.assistant
 
+import com.syeyoung.assistant.dav.CalDav
+import com.syeyoung.assistant.dav.Workspace
 import com.syeyoung.assistant.quickadd.ItemExtractor
 import com.syeyoung.assistant.quickadd.LlmDraft
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres
@@ -60,12 +62,14 @@ class TestInfra {
     fun fakeSource() = FakeSource()
 }
 
-@SpringBootTest(properties = ["app.sources.scheduler-enabled=false", "app.series.scheduler-enabled=false"])
+@SpringBootTest(properties = ["app.sources.scheduler-enabled=false"])
 @Import(TestInfra::class)
 abstract class ApiTestBase {
     @Autowired lateinit var context: ApplicationContext
     @Autowired lateinit var db: DatabaseClient
     @Autowired lateinit var extractor: FakeExtractor
+    @Autowired lateinit var dav: CalDav
+    @Autowired lateinit var ws: Workspace
 
     lateinit var client: WebTestClient
 
@@ -81,12 +85,20 @@ abstract class ApiTestBase {
             registry.add("spring.flyway.url") { "jdbc:postgresql://$host:$port/postgres" }
             registry.add("spring.flyway.user") { "postgres" }
             registry.add("spring.flyway.password") { "postgres" }
+            registry.add("app.dav.url") { TestRadicale.url }
+            registry.add("app.dav.username") { "tester" }
+            registry.add("app.dav.password") { "x" }
         }
     }
 
     @BeforeEach
     fun setUp() {
-        runBlocking { db.sql("truncate items, series, tags, sources, source_tags, feed_tokens").await() }
+        runBlocking {
+            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, items, series, tags, source_tags").await()
+            // Every test starts with an empty CalDAV home.
+            dav.collections().forEach { dav.deleteCollection(it.href) }
+            ws.invalidate()
+        }
         client = WebTestClient.bindToApplicationContext(context).build()
     }
 
@@ -109,15 +121,12 @@ abstract class ApiTestBase {
             .expectBody(List::class.java).returnResult().responseBody as List<Map<String, Any?>>
 
     @Suppress("UNCHECKED_CAST")
-    fun patch(path: String, body: Any, ifMatch: Long? = null): Map<String, Any?> =
+    fun patch(path: String, body: Any, ifMatch: String? = null): Map<String, Any?> =
         client.patch().uri(path).contentType(MediaType.APPLICATION_JSON)
-            .headers { h -> ifMatch?.let { h.ifMatch = listOf("\"$it\"") } }
+            .headers { h -> ifMatch?.let { h.ifMatch = listOf(it) } }
             .bodyValue(body)
             .exchange().expectStatus().isOk
             .expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
 
-    fun tag(name: String, color: String) = post("/api/v1/tags", mapOf("name" to name, "color" to color))["id"] as String
-
-    @Suppress("UNCHECKED_CAST")
-    fun Map<String, Any?>.derived() = this["derived"] as Map<String, Any?>
+    fun calendar(name: String, color: String = "#2F5BE0") = post("/api/v1/calendars", mapOf("name" to name, "color" to color))["id"] as String
 }

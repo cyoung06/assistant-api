@@ -41,6 +41,9 @@ dependencies {
     implementation("ai.koog:http-client-spring-webclient:$koogVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json")
 
+    // iCalendar recurrence expansion (any RRULE a calendar app may write).
+    implementation("org.mnode.ical4j:ical4j:4.4.0")
+
     // Compile scope for its jsonb type (io.r2dbc.postgresql.codec.Json).
     implementation("org.postgresql:r2dbc-postgresql")
     // Flyway runs migrations over JDBC.

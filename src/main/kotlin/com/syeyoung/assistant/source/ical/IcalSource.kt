@@ -3,10 +3,10 @@ package com.syeyoung.assistant.source.ical
 import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.ical.IcalEvent
 import com.syeyoung.assistant.ical.IcalParser
-import com.syeyoung.assistant.item.SourceType
-import com.syeyoung.assistant.series.Freq
-import com.syeyoung.assistant.series.Recurrence
-import com.syeyoung.assistant.series.RepeatRule
+import com.syeyoung.assistant.source.SourceType
+import com.syeyoung.assistant.ical.Freq
+import com.syeyoung.assistant.ical.Recurrence
+import com.syeyoung.assistant.ical.RepeatRule
 import com.syeyoung.assistant.source.DataSource
 import com.syeyoung.assistant.source.SourceRecord
 import com.syeyoung.assistant.source.SourceSnapshot

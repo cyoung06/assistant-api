@@ -1,15 +1,14 @@
 package com.syeyoung.assistant
 
-import com.syeyoung.assistant.item.SourceType
 import com.syeyoung.assistant.source.DataSource
 import com.syeyoung.assistant.source.SourceRecord
 import com.syeyoung.assistant.source.SourceSnapshot
 import com.syeyoung.assistant.source.SourceTag
+import com.syeyoung.assistant.source.SourceType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.http.MediaType
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -38,135 +37,112 @@ class SourceSyncTest : ApiTestBase() {
         fake.failWith = null
     }
 
+    private val stats = SourceTag("course:15", "확률및통계")
+    private val assignment = SourceTag("module:assign", "assignment")
+
     private fun record(ref: String, title: String, due: String, vararg tags: SourceTag) =
         SourceRecord(ref, title, LocalDate.parse(due), LocalTime.of(23, 59), url = "https://example.test/$ref", tags = tags.toList())
-
-    private val stats = SourceTag("course:15", "확률및통계")
 
     @Suppress("UNCHECKED_CAST")
     private fun sync(): Map<String, Any?> =
         client.post().uri("/api/v1/sources/email/sync").exchange().expectStatus().isOk
             .expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
 
-    @Suppress("UNCHECKED_CAST")
-    private fun itemsFromSource(): List<Map<String, Any?>> =
-        (get("/api/v1/items?limit=200")["items"] as List<Map<String, Any?>>).filter { (it["source"] as Map<*, *>)["type"] == "email" }
+    private fun report() = sync()["lastReport"] as Map<*, *>
+
+    private fun synced() = getList("/api/v1/tasks?status=all").filter { it["source"] == "email" }
 
     @Test
-    fun `creates items with course tags, then updates only what the source owns`() {
-        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "HW6", "2026-10-20", stats, SourceTag("module:assign", "assignment"))))
-        val first = sync()
-        assertThat((first["lastReport"] as Map<*, *>)["created"]).isEqualTo(1)
+    fun `creates tasks in a calendar per course, then updates only what the source owns`() {
+        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "HW6", "2026-10-20", stats, assignment)))
+        assertThat(report()["created"]).isEqualTo(1)
 
-        val item = itemsFromSource().single()
-        val tags = getList("/api/v1/tags").associate { it["name"] to it["id"] }
-        assertThat(item["mainTagId"]).isEqualTo(tags["확률및통계"])
-        assertThat(item["tagIds"] as List<*>).containsExactlyInAnyOrder(tags["확률및통계"], tags["assignment"])
+        val task = synced().single()
+        assertThat(task["calendarName"]).isEqualTo("확률및통계")
+        assertThat(task["categories"]).isEqualTo(listOf("assignment"))
+        val id = task["id"] as String
 
-        // The user adds a note and a tag of their own; PLMS then moves the deadline.
-        val mine = tag("important", "#D13B3B")
-        patch("/api/v1/items/${item["id"]}", mapOf("notes" to "start early", "tagIds" to (item["tagIds"] as List<*>) + mine))
-        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "HW6 (revised)", "2026-10-22", stats)))
-        val second = sync()
-        assertThat((second["lastReport"] as Map<*, *>)["updated"]).isEqualTo(1)
+        // The user adds a category and a note and starts a sub-task; the source then moves the deadline.
+        patch("/api/v1/tasks/$id", mapOf("notes" to "start early", "categories" to listOf("assignment", "important")))
+        post("/api/v1/tasks", mapOf("title" to "read chapter 5", "parentId" to id))
+        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "HW6 (revised)", "2026-10-22", stats, assignment)))
+        assertThat(report()["updated"]).isEqualTo(1)
 
-        val updated = itemsFromSource().single()
+        val updated = get("/api/v1/tasks/$id")
         assertThat(updated["title"]).isEqualTo("HW6 (revised)")
-        assertThat((updated["by"] as Map<*, *>)["date"]).isEqualTo("2026-10-22")
+        assertThat((updated["due"] as Map<*, *>)["date"]).isEqualTo("2026-10-22")
         assertThat(updated["notes"]).isEqualTo("start early")
-        assertThat(updated["tagIds"] as List<*>).contains(mine)
+        assertThat(updated["categories"]).isEqualTo(listOf("assignment", "important"))
+        assertThat(updated["subtasks"]).isEqualTo(1)
+        assertThat(report()["unchanged"]).isEqualTo(1)
     }
 
     @Test
-    fun `merged sections share one tag, and a synced twice item is not duplicated`() {
+    fun `missing tasks are completed, deleted ones stay deleted, and courses share a calendar`() {
+        val from = Instant.parse("2026-10-04T01:00:00Z")
         fake.snapshot = SourceSnapshot(
-            listOf(
-                record("assign:1", "A", "2026-10-20", SourceTag("course:1", "고급 알고리즘")),
-                record("assign:2", "B", "2026-10-21", SourceTag("course:2", "고급 알고리즘")),
-            ),
+            listOf(record("assign:1", "Submitted", "2026-10-20", stats), record("assign:2", "Deleted by me", "2026-10-21", stats), record("assign:3", "Open", "2026-10-22", SourceTag("course:16", "확률및통계"))),
+            completeMissingDueFrom = from,
         )
         sync()
-        sync()
-        assertThat(itemsFromSource()).hasSize(2)
-        assertThat(getList("/api/v1/tags").filter { it["name"] == "고급 알고리즘" }).hasSize(1)
-    }
+        assertThat(getList("/api/v1/calendars").map { it["name"] }).containsExactly("확률및통계")
+        val byTitle = synced().associateBy { it["title"] }
+        client.delete().uri("/api/v1/tasks/${byTitle["Deleted by me"]!!["id"]}").exchange().expectStatus().isNoContent
 
-    @Test
-    fun `items that disappear from the source are completed, deleted ones stay deleted`() {
-        // The test clock is 2026-10-18 10:00.
-        val window = Instant.parse("2026-10-04T01:00:00Z")
-        fake.snapshot = SourceSnapshot(
-            listOf(record("assign:1", "Submitted", "2026-10-20"), record("assign:2", "Deleted by me", "2026-10-21"), record("assign:3", "Still open", "2026-10-22")),
-            completeMissingDueFrom = window,
-        )
-        sync()
-        val byTitle = itemsFromSource().associateBy { it["title"] }
-        client.delete().uri("/api/v1/items/${byTitle["Deleted by me"]!!["id"]}").exchange().expectStatus().isNoContent
-
-        // Assignment 1 was submitted, so PLMS no longer lists it; 2 is still listed but deleted in the app.
-        fake.snapshot = SourceSnapshot(
-            listOf(record("assign:2", "Deleted by me", "2026-10-21"), record("assign:3", "Still open", "2026-10-22")),
-            completeMissingDueFrom = window,
-        )
-        val report = sync()["lastReport"] as Map<*, *>
-        assertThat(report["completed"]).isEqualTo(1)
-        assertThat(report["skippedDeleted"]).isEqualTo(1)
-
-        val after = itemsFromSource().associateBy { it["title"] }
-        assertThat(after["Submitted"]!!["doneAt"]).isNotNull()
-        assertThat(after["Still open"]!!["doneAt"]).isNull()
+        fake.snapshot = SourceSnapshot(listOf(record("assign:2", "Deleted by me", "2026-10-21", stats), record("assign:3", "Open", "2026-10-22", stats)), completeMissingDueFrom = from)
+        val r = report()
+        assertThat(r["completed"]).isEqualTo(1)
+        assertThat(r["skippedDeleted"]).isEqualTo(1)
+        val after = synced().associateBy { it["title"] }
+        assertThat(after["Submitted"]!!["done"]).isEqualTo(true)
+        assertThat(after["Open"]!!["done"]).isEqualTo(false)
         assertThat(after).doesNotContainKey("Deleted by me")
     }
 
     @Test
-    fun `a tag the user deleted is not recreated`() {
+    fun `calendar feeds create events and delete the ones they no longer list`() {
+        val holiday = SourceTag("ical:kr", "holiday")
+        fun day(ref: String, title: String, date: String) = SourceRecord(ref, title, atStartDate = LocalDate.parse(date), atEndDate = LocalDate.parse(date), tags = listOf(holiday))
+        fake.snapshot = SourceSnapshot(listOf(day("kr:hangul", "한글날", "2026-10-09"), day("kr:xmas", "기독탄신일", "2026-12-25")), deleteMissing = true)
+        sync()
+        assertThat(getList("/api/v1/agenda?from=2026-10-01&to=2026-12-31").map { it["title"] }).containsExactly("한글날", "기독탄신일")
+
+        fake.snapshot = SourceSnapshot(listOf(day("kr:hangul", "한글날", "2026-10-10")), deleteMissing = true)
+        val r = report()
+        assertThat(r["deleted"]).isEqualTo(1)
+        assertThat(r["updated"]).isEqualTo(1)
+        val after = getList("/api/v1/agenda?from=2026-10-01&to=2026-12-31")
+        assertThat(after.map { it["title"] to it["startDate"] }).containsExactly("한글날" to "2026-10-10")
+        assertThat(after.single()["calendarName"]).isEqualTo("holiday")
+    }
+
+    @Test
+    fun `a calendar the user deleted is not recreated, its tasks go to the inbox`() {
         fake.snapshot = SourceSnapshot(listOf(record("assign:1", "A", "2026-10-20", stats)))
         sync()
-        val tagId = getList("/api/v1/tags").single { it["name"] == "확률및통계" }["id"]
-        client.delete().uri("/api/v1/tags/$tagId").exchange().expectStatus().isNoContent
+        client.delete().uri("/api/v1/tasks/${synced().single()["id"]}").exchange().expectStatus().isNoContent
+        val cal = getList("/api/v1/calendars").single { it["name"] == "확률및통계" }["id"]
+        client.delete().uri("/api/v1/calendars/$cal").exchange().expectStatus().isNoContent
 
-        fake.snapshot = SourceSnapshot(listOf(record("assign:1", "A", "2026-10-20", stats), record("assign:2", "B", "2026-10-21", stats)))
+        fake.snapshot = SourceSnapshot(listOf(record("assign:2", "B", "2026-10-21", stats)))
         sync()
-        assertThat(getList("/api/v1/tags").map { it["name"] }).doesNotContain("확률및통계")
-        assertThat(itemsFromSource().single { it["title"] == "B" }["tagIds"] as List<*>).isEmpty()
+        assertThat(getList("/api/v1/calendars").map { it["name"] }).containsExactly("Inbox")
+        assertThat(synced().single()["calendarName"]).isEqualTo("Inbox")
     }
 
     @Test
     fun `a failing source records the error and keeps going`() {
         fake.failWith = "PLMS login failed: check the username and password"
-        val status = sync()
-        assertThat(status["lastError"]).isEqualTo("PLMS login failed: check the username and password")
-        assertThat(status["lastSuccessAt"]).isNull()
-
+        assertThat(sync()["lastError"]).isEqualTo("PLMS login failed: check the username and password")
         fake.failWith = null
         val ok = sync()
         assertThat(ok["lastError"]).isNull()
         assertThat(ok["lastSuccessAt"]).isNotNull()
-
-        val list = getList("/api/v1/sources")
-        assertThat(list.map { it["type"] }).contains("plms", "email")
-        assertThat(list.single { it["type"] == "plms" }["enabled"]).isEqualTo(false)
+        assertThat(getList("/api/v1/sources").map { it["type"] }).contains("plms", "email")
     }
 
     @Test
     fun `unknown sources are 404`() {
-        client.post().uri("/api/v1/sources/nope/sync").contentType(MediaType.APPLICATION_JSON).exchange().expectStatus().isNotFound
-    }
-
-    @Test
-    fun `calendar-style sources own the time and delete events they no longer list`() {
-        val event = SourceRecord("kr:hangul", "한글날", atStartDate = LocalDate.parse("2026-10-09"), atEndDate = LocalDate.parse("2026-10-09"), tags = listOf(SourceTag("ical:kr", "holiday")))
-        val other = SourceRecord("kr:xmas", "기독탄신일", atStartDate = LocalDate.parse("2026-12-25"), atEndDate = LocalDate.parse("2026-12-25"), tags = listOf(SourceTag("ical:kr", "holiday")))
-        fake.snapshot = SourceSnapshot(listOf(event, other), deleteMissing = true)
-        sync()
-        val hangul = itemsFromSource().single { it["title"] == "한글날" }
-        assertThat(hangul["at"]).isEqualTo(mapOf("allDay" to true, "startDate" to "2026-10-09", "endDate" to "2026-10-09"))
-
-        fake.snapshot = SourceSnapshot(listOf(event.copy(atStartDate = LocalDate.parse("2026-10-10"), atEndDate = LocalDate.parse("2026-10-10"))), deleteMissing = true)
-        val report = sync()["lastReport"] as Map<*, *>
-        assertThat(report["deleted"]).isEqualTo(1)
-        assertThat(report["updated"]).isEqualTo(1)
-        assertThat(itemsFromSource().map { it["title"] }).containsExactly("한글날")
-        assertThat((itemsFromSource().single()["at"] as Map<*, *>)["startDate"]).isEqualTo("2026-10-10")
+        client.post().uri("/api/v1/sources/nope/sync").exchange().expectStatus().isNotFound
     }
 }

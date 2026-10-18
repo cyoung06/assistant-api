@@ -2,7 +2,7 @@ package com.syeyoung.assistant.source
 
 import com.syeyoung.assistant.common.NotFoundException
 import com.syeyoung.assistant.config.AppProperties
-import com.syeyoung.assistant.item.SourceType
+import com.syeyoung.assistant.source.SourceType
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

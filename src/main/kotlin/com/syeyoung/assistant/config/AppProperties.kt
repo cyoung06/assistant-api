@@ -9,12 +9,13 @@ data class AppProperties(
     val zone: ZoneId = ZoneId.of("Asia/Seoul"),
     val llm: Llm = Llm(),
     val sources: Sources = Sources(),
-    val series: SeriesSettings = SeriesSettings(),
+    val dav: Dav = Dav(),
 ) {
-    data class SeriesSettings(
-        /** Extends repeating events as days pass (at startup and every [extendEvery]). */
-        val schedulerEnabled: Boolean = true,
-        val extendEvery: Duration = Duration.ofHours(6),
+    /** The CalDAV server (Radicale) holding events and todos. */
+    data class Dav(
+        val url: String = "http://localhost:5232",
+        val username: String = "",
+        val password: String = "",
     )
 
     data class Sources(

@@ -1,4 +1,4 @@
-package com.syeyoung.assistant.series
+package com.syeyoung.assistant.ical
 
 import com.fasterxml.jackson.annotation.JsonValue
 import com.syeyoung.assistant.common.ValidationException

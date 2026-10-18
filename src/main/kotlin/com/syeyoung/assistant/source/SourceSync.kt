@@ -1,129 +1,134 @@
 package com.syeyoung.assistant.source
 
 import com.syeyoung.assistant.config.AppProperties
-import com.syeyoung.assistant.item.Item
-import com.syeyoung.assistant.item.ItemFields
-import com.syeyoung.assistant.item.ItemRepository
-import com.syeyoung.assistant.item.ItemViews
-import com.syeyoung.assistant.item.SourceType
-import com.syeyoung.assistant.tag.TagRepository
+import com.syeyoung.assistant.dav.Cal
+import com.syeyoung.assistant.dav.Due
+import com.syeyoung.assistant.dav.Event
+import com.syeyoung.assistant.dav.Workspace
+import com.syeyoung.assistant.source.SourceType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Applies a source's snapshot to items, in one transaction.
+ * Applies a source's snapshot to the CalDAV workspace.
  *
- * Ownership: the source owns an item's title, deadline and link, and updates them when they change
- * at the source. Everything else (done, tags, notes, scheduled time, sub-items) belongs to the user
- * and is never touched by a sync, except that an item the source stops reporting is marked done
- * when the snapshot asks for it. Items the user deleted are not recreated.
+ * Ownership: the source owns an object's title, deadline or time, link (and notes, when it sends
+ * them). Everything else — done, extra categories, sub-tasks, alarms a client added — belongs to the
+ * user and is kept. Objects the user deleted are not recreated. The first tag picks the calendar
+ * (created on first use, then remembered by the source's key); the others become CATEGORIES.
  */
 @Component
 class SourceApplier(
-    private val items: ItemRepository,
-    private val tags: TagRepository,
+    private val ws: Workspace,
     private val sources: SourceRepository,
     private val props: AppProperties,
 ) {
-    @Transactional
     suspend fun apply(type: SourceType, snapshot: SourceSnapshot, now: Instant): SyncReport {
         var report = SyncReport()
-        val tagCache = mutableMapOf<String, UUID?>()
+        val prefix = "${type.wire}:"
+        val s = ws.snapshot()
+        val tasks = s.tasks.filter { it.sourceRef?.startsWith(prefix) == true }.associateBy { it.sourceRef!! }
+        val events = s.events.filter { it.sourceRef?.startsWith(prefix) == true }.associateBy { it.sourceRef!! }
+        val known = sources.refs(type)
+        val calendarFor = mutableMapOf<String?, String>()
 
         for (record in snapshot.records) {
-            val existing = sources.itemByRef(type, record.ref)
-            report = when {
-                existing == null -> {
-                    val tagIds = record.tags.mapNotNull { t -> tagCache.getOrPut(t.key) { resolveTag(type, t, now) } }.distinct()
-                    items.insert(UUID.randomUUID(), newFields(type, record, tagIds), now)
-                    report.copy(created = report.created + 1)
+            val ref = prefix + record.ref
+            val calendarId = calendarFor.getOrPut(record.tags.firstOrNull()?.key) { resolveCalendar(type, record.tags.firstOrNull()) }
+            val categories = record.tags.drop(1).map { it.name }
+            val isEvent = record.atStart != null || record.atStartDate != null
+            report = if (isEvent) {
+                val existing = events[ref]
+                val fields = Workspace.EventFields(
+                    title = record.title, notes = record.notes ?: existing?.notes.orEmpty(),
+                    start = record.atStart, end = record.atEnd, startDate = record.atStartDate, endDate = record.atEndDate,
+                    categories = existing?.categories ?: categories, relatedUid = existing?.relatedUid, url = record.url, sourceRef = ref,
+                )
+                when {
+                    existing == null && ref in known -> report.copy(skippedDeleted = report.skippedDeleted + 1)
+                    existing == null -> {
+                        val e = ws.createEvent(calendarId, fields)
+                        sources.rememberRef(type, ref, e.uid)
+                        report.copy(created = report.created + 1)
+                    }
+                    sameEvent(existing, fields) -> report.copy(unchanged = report.unchanged + 1)
+                    else -> {
+                        ws.updateEvent(existing) { it.copy(title = fields.title, notes = fields.notes, start = fields.start, end = fields.end, startDate = fields.startDate, endDate = fields.endDate, url = fields.url) }
+                        report.copy(updated = report.updated + 1)
+                    }
                 }
-                existing.deletedAt != null -> report.copy(skippedDeleted = report.skippedDeleted + 1)
-                else -> {
-                    val updated = ownedFields(existing.fields, record)
-                    if (updated == existing.fields) {
+            } else {
+                val existing = tasks[ref]
+                val due = record.dueDate?.let { Due(it, record.dueTime) }
+                when {
+                    existing == null && ref in known -> report.copy(skippedDeleted = report.skippedDeleted + 1)
+                    existing == null -> {
+                        val t = ws.createTask(calendarId, Workspace.TaskFields(record.title, record.notes.orEmpty(), due, categories = categories, url = record.url, sourceRef = ref))
+                        sources.rememberRef(type, ref, t.uid)
+                        report.copy(created = report.created + 1)
+                    }
+                    existing.title == record.title && existing.due == due && existing.url == record.url && (record.notes == null || existing.notes == record.notes) ->
                         report.copy(unchanged = report.unchanged + 1)
-                    } else {
-                        items.update(existing.id, updated, now)
+                    else -> {
+                        ws.updateTask(existing) { it.copy(title = record.title, due = due, url = record.url, notes = record.notes ?: it.notes) }
                         report.copy(updated = report.updated + 1)
                     }
                 }
             }
         }
 
+        val reported = snapshot.records.map { prefix + it.ref }.toSet()
         if (snapshot.deleteMissing) {
-            val reported = snapshot.records.map { it.ref }.toSet()
-            for (item in sources.liveItems(type)) {
-                if (item.fields.sourceRef in reported) continue
-                items.softDeleteTree(item.id, now)
-                report = report.copy(deleted = report.deleted + 1)
-            }
+            for (o in events.values.filter { it.sourceRef !in reported }) { ws.delete(o.href, o.etag); report = report.copy(deleted = report.deleted + 1) }
+            for (o in tasks.values.filter { it.sourceRef !in reported }) { ws.delete(o.href, o.etag); report = report.copy(deleted = report.deleted + 1) }
         }
-
         snapshot.completeMissingDueFrom?.let { from ->
-            val reported = snapshot.records.map { it.ref }.toSet()
-            for (item in sources.openItems(type)) {
-                if (item.fields.sourceRef in reported || !isDueFrom(item, from)) continue
-                items.update(item.id, item.fields.copy(doneAt = now), now)
-                items.completeDescendants(item.id, now, now)
+            for (t in tasks.values) {
+                if (t.sourceRef in reported || t.done) continue
+                val deadline = t.due?.let { d -> d.time?.let { d.date.atTime(it).atZone(props.zone).toInstant() } ?: d.date.plusDays(1).atStartOfDay(props.zone).toInstant() }
+                if (deadline == null || deadline.isBefore(from)) continue
+                ws.updateTask(t) { it.copy(done = true) }
                 report = report.copy(completed = report.completed + 1)
             }
         }
         return report
     }
 
-    private fun isDueFrom(item: Item, from: Instant): Boolean {
-        val deadline = ItemViews.deadline(item.fields, props.zone) ?: return false
-        return !deadline.isBefore(from)
-    }
-
-    private fun newFields(type: SourceType, record: SourceRecord, tagIds: List<UUID>) = ownedFields(
-        ItemFields(mainTagId = tagIds.firstOrNull(), tagIds = tagIds, sourceType = type, sourceRef = record.ref, notes = record.notes ?: ""),
-        record,
-    )
+    private fun sameEvent(e: Event, f: Workspace.EventFields) =
+        e.title == f.title && e.notes == f.notes && e.start == f.start && e.end == f.end && e.startDate == f.startDate && e.endDate == f.endDate && e.url == f.url
 
     /**
-     * [fields] with what the source owns: title, deadline and link, plus the scheduled time and notes
-     * when the record carries them (calendar events). A deadline-only record leaves any time the user
-     * scheduled alone.
+     * The calendar for a source grouping: the remembered one, else an existing calendar with the same
+     * name, else a new one. A remembered calendar the user deleted isn't recreated; its items go to the inbox.
      */
-    private fun ownedFields(fields: ItemFields, record: SourceRecord): ItemFields {
-        var f = fields.copy(title = record.title, byDate = record.dueDate, byTime = record.dueTime, sourceUrl = record.url)
-        if (record.atStart != null || record.atStartDate != null) {
-            f = f.copy(atStart = record.atStart, atEnd = record.atEnd, atStartDate = record.atStartDate, atEndDate = record.atEndDate)
-        }
-        record.notes?.let { f = f.copy(notes = it) }
-        return f
+    private suspend fun resolveCalendar(type: SourceType, tag: SourceTag?): String {
+        val s = ws.snapshot()
+        if (tag == null) return inbox()
+        sources.mappedCalendar(type, tag.key)?.let { mapped -> return s.calendars.find { it.id == mapped }?.id ?: inbox() }
+        val cal = s.calendars.find { it.name.equals(tag.name, ignoreCase = true) } ?: ws.createCalendar(tag.name, leastUsedColor(s.calendars))
+        sources.mapCalendar(type, tag.key, cal.id)
+        return cal.id
     }
 
-    /**
-     * The tag for an external key: the mapped tag, else an existing tag with the same name, else a new
-     * one. Null when the mapped tag was deleted: the user removed it on purpose, so don't bring it back.
-     */
-    private suspend fun resolveTag(type: SourceType, tag: SourceTag, now: Instant): UUID? {
-        sources.mappedTag(type, tag.key)?.let { mapped -> return tags.find(mapped)?.id }
-        val id = tags.findAll().firstOrNull { it.name.equals(tag.name, ignoreCase = true) }?.id
-            ?: tags.insert(UUID.randomUUID(), tag.name.take(60), leastUsedColor(), now).id
-        sources.mapTag(type, tag.key, id)
-        return id
+    private suspend fun inbox(): String {
+        val s = ws.snapshot()
+        return (s.calendars.find { it.name == INBOX } ?: ws.createCalendar(INBOX, "#6B7280", slug = "inbox")).id
     }
 
-    /** The palette color fewest tags use, so a new course doesn't share a color with another. */
-    private suspend fun leastUsedColor(): String {
-        val counts = tags.findAll().groupingBy { it.color.uppercase() }.eachCount()
+    private fun leastUsedColor(calendars: List<Cal>): String {
+        val counts = calendars.groupingBy { it.color?.uppercase() }.eachCount()
         return PALETTE.minBy { counts[it] ?: 0 }
     }
 
-    private companion object {
+    companion object {
+        const val INBOX = "Inbox"
         val PALETTE = listOf("#2F5BE0", "#E0642F", "#1F8A4C", "#A23FD1", "#D13B6E", "#0E8C9C", "#B88A00", "#7A5230", "#5B6CFF", "#C2410C", "#4D7C0F", "#BE185D")
     }
 }

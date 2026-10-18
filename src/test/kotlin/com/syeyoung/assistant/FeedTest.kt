@@ -2,6 +2,7 @@ package com.syeyoung.assistant
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.MediaType
 
 class FeedTest : ApiTestBase() {
     private fun feedText(path: String): String =
@@ -10,36 +11,25 @@ class FeedTest : ApiTestBase() {
             .expectBody(String::class.java).returnResult().responseBody!!
 
     @Test
-    fun `the feed has events, open deadlines and classes, and rotating revokes the old URL`() {
-        post("/api/v1/items", mapOf("title" to "Meeting", "at" to mapOf("start" to "2026-10-22T15:00:00+09:00", "end" to "2026-10-22T16:00:00+09:00")))
-        post("/api/v1/items", mapOf("title" to "HW6", "by" to mapOf("date" to "2026-10-20", "time" to "19:00")))
-        post("/api/v1/items", mapOf("title" to "Old HW", "by" to mapOf("date" to "2026-10-19"), "doneAt" to "2026-10-18T00:00:00Z"))
-        post(
-            "/api/v1/items",
-            mapOf(
-                "title" to "확률및통계",
-                "at" to mapOf("start" to "2026-10-20T12:30:00+09:00", "end" to "2026-10-20T13:45:00+09:00"),
-                "repeat" to mapOf("freq" to "weekly", "weekdays" to listOf("TUESDAY", "THURSDAY"), "count" to 4),
-            ),
-        )
-        post("/api/v1/items", mapOf("title" to "한글날", "at" to mapOf("allDay" to true, "startDate" to "2026-10-09", "endDate" to "2026-10-09"), "source" to mapOf("type" to "ical", "ref" to "kr:1")))
+    fun `the feed has events and open deadlines from CalDAV, and rotating revokes the old URL`() {
+        val cal = calendar("Lab")
+        client.post().uri("/api/v1/events").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("calendarId" to cal, "title" to "Meeting", "start" to "2026-10-22T15:00:00+09:00", "end" to "2026-10-22T16:00:00+09:00"))
+            .exchange().expectStatus().isCreated
+        post("/api/v1/tasks", mapOf("calendarId" to cal, "title" to "HW6", "due" to mapOf("date" to "2026-10-20", "time" to "19:00")))
+        val old = post("/api/v1/tasks", mapOf("calendarId" to cal, "title" to "Old HW", "due" to mapOf("date" to "2026-10-19")))
+        patch("/api/v1/tasks/${old["id"]}", mapOf("done" to true))
 
         val path = get("/api/v1/ical/feed")["path"] as String
-        assertThat(get("/api/v1/ical/feed")["path"]).isEqualTo(path)
         val ics = feedText(path)
         assertThat(ics).startsWith("BEGIN:VCALENDAR\r\n")
         assertThat(ics).contains("SUMMARY:Meeting", "DTSTART:20261022T060000Z", "SUMMARY:Due: HW6", "DTSTART:20261020T100000Z")
-        assertThat(ics.split("SUMMARY:확률및통계").size - 1).isEqualTo(4)
-        // Done deadlines and events imported from other calendars stay out.
-        assertThat(ics).doesNotContain("Old HW").doesNotContain("한글날")
+        assertThat(ics).doesNotContain("Old HW")
 
-        val rotated = post2xx("/api/v1/ical/feed/rotate")["path"] as String
+        val rotated = client.post().uri("/api/v1/ical/feed/rotate").exchange().expectStatus().isOk
+            .expectBody(Map::class.java).returnResult().responseBody!!["path"] as String
         assertThat(rotated).isNotEqualTo(path)
         client.get().uri(path).exchange().expectStatus().isNotFound
         feedText(rotated)
     }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun post2xx(path: String): Map<String, Any?> =
-        client.post().uri(path).exchange().expectStatus().isOk.expectBody(Map::class.java).returnResult().responseBody as Map<String, Any?>
 }

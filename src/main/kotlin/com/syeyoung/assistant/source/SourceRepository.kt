@@ -2,9 +2,7 @@ package com.syeyoung.assistant.source
 
 import com.syeyoung.assistant.common.opt
 import com.syeyoung.assistant.common.req
-import com.syeyoung.assistant.item.Item
-import com.syeyoung.assistant.item.ItemRepository
-import com.syeyoung.assistant.item.SourceType
+import com.syeyoung.assistant.source.SourceType
 import io.r2dbc.postgresql.codec.Json
 import kotlinx.coroutines.flow.toList
 import org.springframework.r2dbc.core.DatabaseClient
@@ -14,7 +12,6 @@ import org.springframework.r2dbc.core.flow
 import org.springframework.stereotype.Repository
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
-import java.util.UUID
 
 data class SourceStatusRow(
     val lastSyncAt: Instant?,
@@ -56,34 +53,26 @@ class SourceRepository(private val db: DatabaseClient, private val mapper: Objec
         ).bind("type", type.wire).bind("at", at).bind("error", error.take(1000)).fetch().awaitRowsUpdated()
     }
 
-    /** The tag mapped to [externalKey], if any (the tag may since have been deleted). */
-    suspend fun mappedTag(type: SourceType, externalKey: String): UUID? =
-        db.sql("select tag_id from source_tags where source_type = :type and external_key = :key")
-            .bind("type", type.wire).bind("key", externalKey)
-            .map { r -> r.req<UUID>("tag_id") }.awaitOneOrNull()
+    /** UID of every record this source has ever written, by its reference. */
+    suspend fun refs(type: SourceType): Map<String, String> =
+        db.sql("select ref, uid from source_refs where source_type = :type").bind("type", type.wire)
+            .map { r -> r.req<String>("ref") to r.req<String>("uid") }.flow().toList().toMap()
 
-    suspend fun mapTag(type: SourceType, externalKey: String, tagId: UUID) {
-        db.sql(
-            """
-            insert into source_tags (source_type, external_key, tag_id) values (:type, :key, :tag)
-            on conflict (source_type, external_key) do update set tag_id = :tag
-            """,
-        ).bind("type", type.wire).bind("key", externalKey).bind("tag", tagId).fetch().awaitRowsUpdated()
+    suspend fun rememberRef(type: SourceType, ref: String, uid: String) {
+        db.sql("insert into source_refs (source_type, ref, uid) values (:type, :ref, :uid) on conflict do nothing")
+            .bind("type", type.wire).bind("ref", ref).bind("uid", uid).fetch().awaitRowsUpdated()
     }
 
-    /** The item for [ref], including a deleted one (so a deleted item is not recreated). */
-    suspend fun itemByRef(type: SourceType, ref: String): Item? =
-        db.sql("select * from items where source_type = :type and source_ref = :ref order by deleted_at nulls first limit 1")
-            .bind("type", type.wire).bind("ref", ref)
-            .map(ItemRepository::toItem).awaitOneOrNull()
+    suspend fun mappedCalendar(type: SourceType, key: String): String? =
+        db.sql("select calendar_id from source_calendars where source_type = :type and external_key = :key")
+            .bind("type", type.wire).bind("key", key).map { r -> r.req<String>("calendar_id") }.awaitOneOrNull()
 
-    /** Live items from this source. */
-    suspend fun liveItems(type: SourceType): List<Item> =
-        db.sql("select * from items where source_type = :type and deleted_at is null")
-            .bind("type", type.wire).map(ItemRepository::toItem).flow().toList()
-
-    /** Live, not-done items from this source. */
-    suspend fun openItems(type: SourceType): List<Item> =
-        db.sql("select * from items where source_type = :type and deleted_at is null and done_at is null")
-            .bind("type", type.wire).map(ItemRepository::toItem).flow().toList()
+    suspend fun mapCalendar(type: SourceType, key: String, calendarId: String) {
+        db.sql(
+            """
+            insert into source_calendars (source_type, external_key, calendar_id) values (:type, :key, :cal)
+            on conflict (source_type, external_key) do update set calendar_id = :cal
+            """,
+        ).bind("type", type.wire).bind("key", key).bind("cal", calendarId).fetch().awaitRowsUpdated()
+    }
 }

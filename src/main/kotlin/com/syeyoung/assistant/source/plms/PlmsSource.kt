@@ -1,7 +1,7 @@
 package com.syeyoung.assistant.source.plms
 
 import com.syeyoung.assistant.config.AppProperties
-import com.syeyoung.assistant.item.SourceType
+import com.syeyoung.assistant.source.SourceType
 import com.syeyoung.assistant.source.DataSource
 import com.syeyoung.assistant.source.SourceRecord
 import com.syeyoung.assistant.source.SourceSnapshot
