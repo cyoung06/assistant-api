@@ -68,6 +68,8 @@ class Migration(private val db: DatabaseClient, private val ws: Workspace) {
         }
 
         val existingUids = ws.snapshot().let { s -> (s.tasks.map { it.uid } + s.events.map { it.uid }).toSet() }
+        // A source may already have written its own copy (e.g. a sync ran before this migration).
+        val existingRefs = ws.snapshot().tasks.mapNotNull { it.sourceRef }.toSet()
         val uidOf = { id: UUID -> "$id@assistant" }
         val byId = live.associateBy { it.id }
         fun calendarFor(i: OldItem): String =
@@ -83,7 +85,7 @@ class Migration(private val db: DatabaseClient, private val ws: Workspace) {
             val cats = categoriesFor(i.tagIds, i.mainTagId)
             val sourceRef = if (i.sourceType == "plms" && i.sourceRef != null) "plms:${i.sourceRef}" else null
             if (isTask) {
-                if (uid in existingUids) { skipped++ } else {
+                if (uid in existingUids || sourceRef in existingRefs) { skipped++ } else {
                     ws.createTask(
                         calendarFor(i),
                         Workspace.TaskFields(i.title, i.notes, i.byDate?.let { Due(it, i.byTime) }, i.doneAt != null, cats, i.parentId?.let(uidOf), i.sourceUrl, sourceRef),
