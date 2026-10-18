@@ -29,6 +29,11 @@ data class SourceSnapshot(
      * Null: never complete missing items.
      */
     val completeMissingDueFrom: Instant? = null,
+    /**
+     * Items from this source that are no longer reported are deleted (for calendars, where a missing
+     * event was removed rather than completed).
+     */
+    val deleteMissing: Boolean = false,
 )
 
 /** One external thing that should exist as an item. */
@@ -38,6 +43,12 @@ data class SourceRecord(
     val title: String,
     val dueDate: LocalDate? = null,
     val dueTime: LocalTime? = null,
+    /** Scheduled time, for events: timed ([atStart]/[atEnd]) or all-day ([atStartDate]..[atEndDate], inclusive). */
+    val atStart: Instant? = null,
+    val atEnd: Instant? = null,
+    val atStartDate: LocalDate? = null,
+    val atEndDate: LocalDate? = null,
+    val notes: String? = null,
     val url: String? = null,
     /** Tags to attach when the item is created; the first one becomes the main tag. */
     val tags: List<SourceTag> = emptyList(),
@@ -53,4 +64,5 @@ data class SyncReport(
     val unchanged: Int = 0,
     /** Records whose item was deleted in the app; they are not recreated. */
     val skippedDeleted: Int = 0,
+    val deleted: Int = 0,
 )

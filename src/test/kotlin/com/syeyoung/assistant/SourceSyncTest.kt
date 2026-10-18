@@ -39,7 +39,7 @@ class SourceSyncTest : ApiTestBase() {
     }
 
     private fun record(ref: String, title: String, due: String, vararg tags: SourceTag) =
-        SourceRecord(ref, title, LocalDate.parse(due), LocalTime.of(23, 59), "https://example.test/$ref", tags.toList())
+        SourceRecord(ref, title, LocalDate.parse(due), LocalTime.of(23, 59), url = "https://example.test/$ref", tags = tags.toList())
 
     private val stats = SourceTag("course:15", "확률및통계")
 
@@ -151,5 +151,22 @@ class SourceSyncTest : ApiTestBase() {
     @Test
     fun `unknown sources are 404`() {
         client.post().uri("/api/v1/sources/nope/sync").contentType(MediaType.APPLICATION_JSON).exchange().expectStatus().isNotFound
+    }
+
+    @Test
+    fun `calendar-style sources own the time and delete events they no longer list`() {
+        val event = SourceRecord("kr:hangul", "한글날", atStartDate = LocalDate.parse("2026-10-09"), atEndDate = LocalDate.parse("2026-10-09"), tags = listOf(SourceTag("ical:kr", "holiday")))
+        val other = SourceRecord("kr:xmas", "기독탄신일", atStartDate = LocalDate.parse("2026-12-25"), atEndDate = LocalDate.parse("2026-12-25"), tags = listOf(SourceTag("ical:kr", "holiday")))
+        fake.snapshot = SourceSnapshot(listOf(event, other), deleteMissing = true)
+        sync()
+        val hangul = itemsFromSource().single { it["title"] == "한글날" }
+        assertThat(hangul["at"]).isEqualTo(mapOf("allDay" to true, "startDate" to "2026-10-09", "endDate" to "2026-10-09"))
+
+        fake.snapshot = SourceSnapshot(listOf(event.copy(atStartDate = LocalDate.parse("2026-10-10"), atEndDate = LocalDate.parse("2026-10-10"))), deleteMissing = true)
+        val report = sync()["lastReport"] as Map<*, *>
+        assertThat(report["deleted"]).isEqualTo(1)
+        assertThat(report["updated"]).isEqualTo(1)
+        assertThat(itemsFromSource().map { it["title"] }).containsExactly("한글날")
+        assertThat((itemsFromSource().single()["at"] as Map<*, *>)["startDate"]).isEqualTo("2026-10-10")
     }
 }

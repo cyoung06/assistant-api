@@ -86,7 +86,7 @@ abstract class ApiTestBase {
 
     @BeforeEach
     fun setUp() {
-        runBlocking { db.sql("truncate items, series, tags, sources, source_tags").await() }
+        runBlocking { db.sql("truncate items, series, tags, sources, source_tags, feed_tokens").await() }
         client = WebTestClient.bindToApplicationContext(context).build()
     }
 

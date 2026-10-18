@@ -21,7 +21,18 @@ data class AppProperties(
         val schedulerEnabled: Boolean = true,
         val initialDelay: Duration = Duration.ofSeconds(30),
         val plms: Plms = Plms(),
+        val ical: Ical = Ical(),
     ) {
+        data class Ical(
+            val subscriptions: List<Subscription> = emptyList(),
+            val interval: Duration = Duration.ofHours(12),
+            val lookback: java.time.Period = java.time.Period.ofYears(1),
+            val lookahead: java.time.Period = java.time.Period.ofYears(2),
+        ) {
+            /** [key] is stable and part of each item's reference; [tag] is the tag its events get. */
+            data class Subscription(val key: String, val name: String, val url: String, val tag: String)
+        }
+
         data class Plms(
             val enabled: Boolean = false,
             val baseUrl: String = "https://plms.postech.ac.kr",

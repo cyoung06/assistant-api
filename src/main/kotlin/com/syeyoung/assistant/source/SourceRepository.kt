@@ -77,6 +77,11 @@ class SourceRepository(private val db: DatabaseClient, private val mapper: Objec
             .bind("type", type.wire).bind("ref", ref)
             .map(ItemRepository::toItem).awaitOneOrNull()
 
+    /** Live items from this source. */
+    suspend fun liveItems(type: SourceType): List<Item> =
+        db.sql("select * from items where source_type = :type and deleted_at is null")
+            .bind("type", type.wire).map(ItemRepository::toItem).flow().toList()
+
     /** Live, not-done items from this source. */
     suspend fun openItems(type: SourceType): List<Item> =
         db.sql("select * from items where source_type = :type and deleted_at is null and done_at is null")

@@ -199,7 +199,7 @@
             "type" : [ "string", "null" ]
           },
           "type" : {
-            "enum" : [ "manual", "plms", "email", "upload" ],
+            "enum" : [ "manual", "plms", "email", "upload", "ical" ],
             "type" : "string"
           },
           "url" : {
@@ -254,6 +254,19 @@
           }
         },
         "required" : [ "displayTitle", "overdue", "subItems", "subItemsDone", "timePlannedMinutes", "timeSpentMinutes" ],
+        "type" : "object"
+      },
+      "FeedInfo" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "createdAt", "path" ],
         "type" : "object"
       },
       "ItemPage" : {
@@ -573,7 +586,7 @@
             "type" : [ "string", "null" ]
           },
           "type" : {
-            "enum" : [ "manual", "plms", "email", "upload" ],
+            "enum" : [ "manual", "plms", "email", "upload", "ical" ],
             "type" : "string"
           },
           "url" : {
@@ -617,7 +630,7 @@
             "type" : "boolean"
           },
           "type" : {
-            "enum" : [ "manual", "plms", "email", "upload" ],
+            "enum" : [ "manual", "plms", "email", "upload", "ical" ],
             "type" : "string"
           }
         },
@@ -631,6 +644,10 @@
             "type" : "integer"
           },
           "created" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "deleted" : {
             "format" : "int32",
             "type" : "integer"
           },
@@ -803,6 +820,68 @@
           }
         },
         "tags" : [ "changes-controller" ]
+      }
+    },
+    "/api/v1/ical/feed" : {
+      "get" : {
+        "operationId" : "feed",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FeedInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "feed-controller" ]
+      }
+    },
+    "/api/v1/ical/feed/rotate" : {
+      "post" : {
+        "operationId" : "rotate",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FeedInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "feed-controller" ]
+      }
+    },
+    "/api/v1/ical/{token}.ics" : {
+      "get" : {
+        "operationId" : "calendar",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "feed-controller" ]
       }
     },
     "/api/v1/items" : {

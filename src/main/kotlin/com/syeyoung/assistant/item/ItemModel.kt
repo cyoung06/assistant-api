@@ -10,7 +10,7 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 enum class SourceType(@get:JsonValue val wire: String) {
-    MANUAL("manual"), PLMS("plms"), EMAIL("email"), UPLOAD("upload");
+    MANUAL("manual"), PLMS("plms"), EMAIL("email"), UPLOAD("upload"), ICAL("ical");
 
     companion object {
         fun fromWire(value: String) = entries.find { it.wire == value }

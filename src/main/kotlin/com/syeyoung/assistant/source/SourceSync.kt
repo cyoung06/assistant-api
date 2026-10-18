@@ -49,12 +49,7 @@ class SourceApplier(
                 }
                 existing.deletedAt != null -> report.copy(skippedDeleted = report.skippedDeleted + 1)
                 else -> {
-                    val updated = existing.fields.copy(
-                        title = record.title,
-                        byDate = record.dueDate,
-                        byTime = record.dueTime,
-                        sourceUrl = record.url,
-                    )
+                    val updated = ownedFields(existing.fields, record)
                     if (updated == existing.fields) {
                         report.copy(unchanged = report.unchanged + 1)
                     } else {
@@ -62,6 +57,15 @@ class SourceApplier(
                         report.copy(updated = report.updated + 1)
                     }
                 }
+            }
+        }
+
+        if (snapshot.deleteMissing) {
+            val reported = snapshot.records.map { it.ref }.toSet()
+            for (item in sources.liveItems(type)) {
+                if (item.fields.sourceRef in reported) continue
+                items.softDeleteTree(item.id, now)
+                report = report.copy(deleted = report.deleted + 1)
             }
         }
 
@@ -82,16 +86,24 @@ class SourceApplier(
         return !deadline.isBefore(from)
     }
 
-    private fun newFields(type: SourceType, record: SourceRecord, tagIds: List<UUID>) = ItemFields(
-        title = record.title,
-        byDate = record.dueDate,
-        byTime = record.dueTime,
-        mainTagId = tagIds.firstOrNull(),
-        tagIds = tagIds,
-        sourceType = type,
-        sourceRef = record.ref,
-        sourceUrl = record.url,
+    private fun newFields(type: SourceType, record: SourceRecord, tagIds: List<UUID>) = ownedFields(
+        ItemFields(mainTagId = tagIds.firstOrNull(), tagIds = tagIds, sourceType = type, sourceRef = record.ref, notes = record.notes ?: ""),
+        record,
     )
+
+    /**
+     * [fields] with what the source owns: title, deadline and link, plus the scheduled time and notes
+     * when the record carries them (calendar events). A deadline-only record leaves any time the user
+     * scheduled alone.
+     */
+    private fun ownedFields(fields: ItemFields, record: SourceRecord): ItemFields {
+        var f = fields.copy(title = record.title, byDate = record.dueDate, byTime = record.dueTime, sourceUrl = record.url)
+        if (record.atStart != null || record.atStartDate != null) {
+            f = f.copy(atStart = record.atStart, atEnd = record.atEnd, atStartDate = record.atStartDate, atEndDate = record.atEndDate)
+        }
+        record.notes?.let { f = f.copy(notes = it) }
+        return f
+    }
 
     /**
      * The tag for an external key: the mapped tag, else an existing tag with the same name, else a new
