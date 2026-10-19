@@ -1,6 +1,7 @@
 package com.syeyoung.assistant
 
 import com.syeyoung.assistant.mail.MailAccounts
+import com.syeyoung.assistant.refs.LinkMigration
 import com.syeyoung.assistant.refs.Ref
 import com.syeyoung.assistant.refs.RefIndex
 import com.syeyoung.assistant.refs.RefKind
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import java.time.Instant
 
 class RefsTest : ApiTestBase() {
+    @Autowired lateinit var migration: LinkMigration
     @Autowired lateinit var index: RefIndex
     @Autowired lateinit var catalog: PlmsCatalog
     @Autowired lateinit var accounts: MailAccounts
@@ -33,8 +35,8 @@ class RefsTest : ApiTestBase() {
         index.replace(
             "plms",
             listOf(
-                Ref(RefKind.PLMS_FILE, "HW6 problems", "https://plms.postech.ac.kr/mod/ubfile/view.php?id=101", "확률및통계"),
-                Ref(RefKind.PLMS_NOTICE, "HW6 deadline extended", "https://plms.postech.ac.kr/mod/ubboard/article.php?id=55&bwid=9", "확률및통계 · 공지사항", Instant.parse("2026-10-17T03:00:00Z")),
+                Ref(RefKind.PLMS_FILE, "HW6 problems", "plms:mod/ubfile/101", "확률및통계"),
+                Ref(RefKind.PLMS_NOTICE, "HW6 deadline extended", "plms:post/55/9", "확률및통계 · 공지사항", Instant.parse("2026-10-17T03:00:00Z")),
             ),
             Instant.now(),
         )
@@ -51,7 +53,7 @@ class RefsTest : ApiTestBase() {
         assertThat(found.map { it["kind"] to it["title"] }).contains(
             "task" to "#1 HW6", "event" to "HW6 review session", "plms_file" to "HW6 problems", "plms_notice" to "HW6 deadline extended",
         )
-        assertThat(found.first { it["kind"] == "task" }["url"]).isEqualTo("$base/#task/${t["id"]}")
+        assertThat(found.first { it["kind"] == "task" }["url"]).isEqualTo("$base/task/${t["id"]}")
         assertThat(search("#1").first()["title"]).isEqualTo("#1 HW6")
         assertThat(search("club").map { it["kind"] }).contains("project")
     }
@@ -59,11 +61,14 @@ class RefsTest : ApiTestBase() {
     @Test
     fun `pasted links are named - ours, indexed PLMS pages, and other sites`() {
         val t = post("/api/v1/tasks", mapOf("title" to "Read [the slides](https://example.test/x)"))
-        assertThat(resolve("https://assistant.example/#task/${t["id"]}")).containsEntry("title", "#1 Read the slides").containsEntry("kind", "task")
+        assertThat(resolve("https://assistant.example/task/${t["id"]}")).containsEntry("title", "#1 Read the slides").containsEntry("kind", "task")
+        // The old #fragment form still resolves.
+        assertThat(resolve("https://assistant.example/#task/${t["id"]}")).containsEntry("url", "$base/task/${t["id"]}")
         indexPlms()
         // Board links carry paging parameters; they resolve to the indexed post.
         assertThat(resolve("https://plms.postech.ac.kr/mod/ubboard/article.php?keyfield&keyword&ls=15&page=1&bwid=9&id=55"))
-            .containsEntry("title", "HW6 deadline extended").containsEntry("kind", "plms_notice")
+            .containsEntry("title", "HW6 deadline extended").containsEntry("kind", "plms_notice").containsEntry("url", "plms:post/55/9")
+        assertThat(resolve("plms:mod/ubfile/101")).containsEntry("title", "HW6 problems")
         // Local addresses are never fetched; the link is named after its host and path.
         assertThat(resolve("http://127.0.0.1:1/page")).containsEntry("kind", "link").containsEntry("title", "127.0.0.1/page")
         client.get().uri { it.path("/api/v1/refs/resolve").queryParam("url", "{v}").build("javascript:alert(1)") }.exchange().expectStatus().isBadRequest
@@ -72,7 +77,7 @@ class RefsTest : ApiTestBase() {
     @Test
     fun `backlinks list what links to a task`() {
         val target = post("/api/v1/tasks", mapOf("title" to "Midterm"))
-        val link = "$base/#task/${target["id"]}"
+        val link = "$base/task/${target["id"]}"
         post("/api/v1/tasks", mapOf("title" to "Study plan", "description" to "Before [#1 Midterm]($link)"))
         post("/api/v1/events", mapOf("title" to "Study group for [#1 Midterm]($link)", "start" to "2026-10-21T15:00:00+09:00", "end" to "2026-10-21T16:00:00+09:00"))
         @Suppress("UNCHECKED_CAST")
@@ -114,7 +119,7 @@ class RefsTest : ApiTestBase() {
         """
         val posts = catalog.posts(board, "고급 알고리즘 · 공지사항")
         assertThat(posts.single()).isEqualTo(
-            Ref(RefKind.PLMS_NOTICE, "Midterm room change", "https://plms.postech.ac.kr/mod/ubboard/article.php?id=232395&bwid=97868", "고급 알고리즘 · 공지사항", Instant.parse("2026-10-01T06:58:06Z")),
+            Ref(RefKind.PLMS_NOTICE, "Midterm room change", "plms:post/232395/97868", "고급 알고리즘 · 공지사항", Instant.parse("2026-10-01T06:58:06Z")),
         )
     }
 
@@ -130,10 +135,35 @@ class RefsTest : ApiTestBase() {
         TestMail.deliver("Lab meeting moved", "lab@postech.ac.kr", flagged = false)
         val hit = search("lab meeting").single { it["kind"] == "mail" }
         assertThat(hit["context"]).isEqualTo("Prof. Kim <prof@postech.ac.kr>")
-        assertThat(hit["url"]).isEqualTo("$base/#mail/lab%40postech.ac.kr")
+        assertThat(hit["url"]).isEqualTo("mid:lab@postech.ac.kr")
         @Suppress("UNCHECKED_CAST")
         val message = withParam("/api/v1/mail/message", "id", "lab@postech.ac.kr") as Map<String, Any?>
         assertThat(message).containsEntry("subject", "Lab meeting moved").containsEntry("text", "Please reply.")
         assertThat(resolve(hit["url"] as String)).containsEntry("title", "Lab meeting moved")
+    }
+
+    @Test
+    fun `old links are rewritten, and the feed shows mail and PLMS links as pages`() {
+        val target = post("/api/v1/tasks", mapOf("title" to "Midterm"))
+        val t = post(
+            "/api/v1/tasks",
+            mapOf(
+                "title" to "Study [Midterm](https://assistant.example/#task/${target["id"]})",
+                "description" to "See [mail](https://assistant.example/#mail/lab%40postech.ac.kr) and [HW6](https://plms.postech.ac.kr/mod/ubfile/view.php?id=101)",
+                "due" to mapOf("date" to "2026-10-20"),
+            ),
+        )
+        val e = post("/api/v1/events", mapOf("title" to "Review", "notes" to "[post](https://plms.postech.ac.kr/mod/ubboard/article.php?ls=15&bwid=9&id=55)", "startDate" to "2026-10-21"))
+        assertThat(runBlocking { migration.migrate() }).isEqualTo(2)
+        val task = get("/api/v1/tasks/${t["id"]}")
+        assertThat(task["title"]).isEqualTo("Study [Midterm]($base/task/${target["id"]})")
+        assertThat(task["description"]).isEqualTo("See [mail](mid:lab@postech.ac.kr) and [HW6](plms:mod/ubfile/101)")
+        assertThat(get("/api/v1/events/${e["id"]}")["notes"]).isEqualTo("[post](plms:post/55/9)")
+        assertThat(runBlocking { migration.migrate() }).isEqualTo(0)
+
+        val feed = client.get().uri(get("/api/v1/ical/feed")["path"] as String).exchange().expectBody(String::class.java).returnResult().responseBody!!
+            .replace("\r\n ", "")
+        assertThat(feed).contains("$base/mail/lab%40postech.ac.kr", "https://plms.postech.ac.kr/mod/ubfile/view.php?id=101", "https://plms.postech.ac.kr/mod/ubboard/article.php?id=55&bwid=9")
+            .doesNotContain("mid:", "plms:")
     }
 }

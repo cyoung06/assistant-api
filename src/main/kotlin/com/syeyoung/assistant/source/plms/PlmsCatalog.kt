@@ -1,6 +1,7 @@
 package com.syeyoung.assistant.source.plms
 
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.refs.PlmsLinks
 import com.syeyoung.assistant.refs.Ref
 import com.syeyoung.assistant.refs.RefIndex
 import com.syeyoung.assistant.refs.RefKind
@@ -76,11 +77,11 @@ class PlmsCatalog(
             val id = course.path("id").asLong()
             val name = PlmsSource.courseName(course.path("fullname").asString(""))
             val courseUrl = "$base/course/view.php?id=$id"
-            refs += Ref(RefKind.PLMS_COURSE, name, courseUrl, "course")
+            refs += Ref(RefKind.PLMS_COURSE, name, PlmsLinks.fromWeb(courseUrl, base), "course")
             val activities = activities(plms.client.page(courseUrl), name)
             refs += activities
-            for (board in activities.filter { "/mod/ubboard/" in it.url }) {
-                refs += posts(plms.client.page(board.url), "$name · ${board.title}")
+            for (board in activities.filter { it.url.startsWith("plms:mod/ubboard/") }) {
+                refs += posts(plms.client.page(PlmsLinks.toWeb(board.url, base)!!), "$name · ${board.title}")
             }
         }
         index.replace(SOURCE, refs, Instant.now(clock))
@@ -98,7 +99,7 @@ class PlmsCatalog(
             "assign" -> RefKind.PLMS_ASSIGNMENT
             else -> RefKind.PLMS_ACTIVITY
         }
-        Ref(kind, title, "$base/mod/$mod/view.php?id=$cmid", course)
+        Ref(kind, title, "plms:mod/$mod/$cmid", course)
     }.distinctBy { it.url }.toList()
 
     /** The first page of a board: its most recent posts. */
@@ -110,7 +111,7 @@ class PlmsCatalog(
         val date = POST_DATE.find(row.value)?.groupValues?.get(1)?.let { runCatching { LocalDateTime.parse(it, STAMP).atZone(ZONE).toInstant() }.getOrNull() }
         // Badges ("N" for new) aren't part of the title.
         val title = text(link.groupValues[2].replace(BADGE, ""))
-        Ref(RefKind.PLMS_NOTICE, title, canonicalPost(cmid, bwid), context, date)
+        Ref(RefKind.PLMS_NOTICE, title, "plms:post/$cmid/$bwid", context, date)
     }.distinctBy { it.url }.toList()
 
     private fun canonicalPost(cmid: String, bwid: String) = "$base/mod/ubboard/article.php?id=$cmid&bwid=$bwid"

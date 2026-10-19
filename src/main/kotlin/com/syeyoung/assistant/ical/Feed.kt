@@ -5,6 +5,7 @@ import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.dav.IcsDocument
 import com.syeyoung.assistant.dav.Workspace
+import com.syeyoung.assistant.refs.AppLinks
 import com.syeyoung.assistant.tasks.TaskExport
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -80,12 +81,20 @@ class FeedService(
             for (c in doc.root.children) {
                 when (c.name) {
                     "VTIMEZONE" -> if (timezones.add(c.value("TZID").orEmpty())) root.children += c
-                    "VEVENT" -> root.children += c
+                    "VEVENT" -> root.children += withWebLinks(c)
                 }
             }
         }
         root.children += tasks.components()
         return IcsDocument(root).serialize()
+    }
+
+    /** Calendar apps only open web links: an event's notes with mail and PLMS links as pages (a copy; the stored event stays). */
+    private fun withWebLinks(c: IcsDocument.Comp): IcsDocument.Comp {
+        val notes = c.text("DESCRIPTION") ?: return c
+        val web = AppLinks.webLinks(notes, props.publicUrl, props.sources.plms.baseUrl)
+        if (web == notes) return c
+        return IcsDocument.Comp(c.name, c.props.toMutableList(), c.children).apply { setText("DESCRIPTION", web) }
     }
 
     private suspend fun active(): FeedInfo? =

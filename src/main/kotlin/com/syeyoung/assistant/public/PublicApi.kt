@@ -180,7 +180,7 @@ class PublicController(
             labels.find { it.name.equals(name, true) }?.id ?: tasks.createLabel(LabelRequest(name)).id
         }
         val t = tasks.create(CreateTaskRequest(title = req.title, description = req.description, due = req.due, projectId = req.projectId, labelIds = labelIds, priority = req.priority))
-        return Created(t.id.toString(), "${props.publicUrl.trimEnd('/')}/#task/${t.id}")
+        return Created(t.id.toString(), "${props.publicUrl.trimEnd('/')}/task/${t.id}")
     }
 
     @PostMapping("/analyze")
@@ -197,7 +197,7 @@ class PublicController(
         tokens.authorize(auth)
         if (req.repeat != null) throw ValidationException("Repeating events are made in the app")
         val e = calendar.create(req)
-        return Created(e.id, "${props.publicUrl.trimEnd('/')}/#event/${java.net.URLEncoder.encode(e.id, Charsets.UTF_8)}")
+        return Created(e.id, "${props.publicUrl.trimEnd('/')}/event/${java.net.URLEncoder.encode(e.id, Charsets.UTF_8)}")
     }
 }
 

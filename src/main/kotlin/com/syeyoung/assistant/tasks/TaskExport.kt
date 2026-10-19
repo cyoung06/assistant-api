@@ -3,6 +3,7 @@ package com.syeyoung.assistant.tasks
 import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.dav.IcsDocument
 import com.syeyoung.assistant.dav.Workspace
+import com.syeyoung.assistant.refs.AppLinks
 import com.syeyoung.assistant.refs.plainText
 import org.springframework.stereotype.Component
 import java.time.Clock
@@ -18,6 +19,8 @@ import java.util.UUID
 @Component
 class TaskExport(private val repo: TaskRepository, private val clock: Clock, props: AppProperties) {
     private val zone = props.zone
+    private val base = props.publicUrl
+    private val plmsBase = props.sources.plms.baseUrl
 
     suspend fun components(): List<IcsDocument.Comp> {
         val tasks = repo.tasks()
@@ -32,7 +35,8 @@ class TaskExport(private val repo: TaskRepository, private val clock: Clock, pro
             todo.set("CREATED", Workspace.utc(t.createdAt))
             todo.set("LAST-MODIFIED", Workspace.utc(t.updatedAt))
             todo.setText("SUMMARY", plainText(t.title))
-            todo.setText("DESCRIPTION", t.description.ifBlank { null })
+            // Calendar apps only open web links: mail and PLMS links as pages.
+            todo.setText("DESCRIPTION", t.description.ifBlank { null }?.let { AppLinks.webLinks(it, base, plmsBase) })
             todo.set("STATUS", STATUS.getValue(t.status))
             if (t.status == TaskStatus.DONE) {
                 todo.set("PERCENT-COMPLETE", "100")

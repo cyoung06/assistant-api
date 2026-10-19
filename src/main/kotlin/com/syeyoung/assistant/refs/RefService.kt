@@ -41,7 +41,8 @@ class RefService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val base = props.publicUrl
-    private val plmsHost = URI(props.sources.plms.baseUrl).host
+    private val plmsBase = props.sources.plms.baseUrl
+    private val plmsHost = URI(plmsBase).host
     private val http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(5)).build()
 
     /** Everything matching [query], from every provider at once; mail gets a few seconds at most. */
@@ -58,9 +59,12 @@ class RefService(
             .map { it.value }.distinctBy { it.url }.take(limit)
     }
 
-    /** The thing behind a pasted link: one of ours, a known PLMS page, or any web page by its title. */
+    /** The thing behind a pasted link: one of ours, a mail, a known PLMS page, or any web page by its title. */
     suspend fun resolve(url: String): Ref {
-        val uri = runCatching { URI(url.trim()) }.getOrNull()?.takeIf { it.scheme in setOf("http", "https") && it.host != null }
+        val pasted = url.trim()
+        if (pasted.startsWith("mid:")) return mail.resolve(pasted) ?: Ref(RefKind.MAIL, "Mail", pasted)
+        if (pasted.startsWith("plms:")) return index.resolve(pasted) ?: PlmsLinks.toWeb(pasted, plmsBase)?.let { resolve(it) } ?: throw ValidationException("Not a PLMS link")
+        val uri = runCatching { URI(pasted) }.getOrNull()?.takeIf { it.scheme in setOf("http", "https") && it.host != null }
             ?: throw ValidationException("Not a web link")
         val link = uri.toString()
         AppLinks.parse(link)?.let { target ->
@@ -73,10 +77,11 @@ class RefService(
         }
         if (uri.host == plmsHost) {
             val canonical = catalog.canonical(link)
-            index.resolve(canonical)?.let { return it }
+            val plmsLink = PlmsLinks.fromWeb(canonical, plmsBase)
+            index.resolve(plmsLink)?.let { return it }
             if (plms.enabled) {
                 val title = runCatching { titleOf(plms.client.page(canonical)) }.getOrNull()
-                return Ref(RefKind.PLMS_ACTIVITY, title?.removePrefix("강좌: ")?.removePrefix("Course: ") ?: "PLMS page", canonical, "PLMS")
+                return Ref(RefKind.PLMS_ACTIVITY, title?.removePrefix("강좌: ")?.removePrefix("Course: ") ?: "PLMS page", plmsLink, "PLMS")
             }
         }
         return Ref(RefKind.LINK, unfurl(uri) ?: uri.host + uri.path.takeIf { it.length > 1 }.orEmpty(), link, uri.host)
@@ -85,11 +90,15 @@ class RefService(
     /** Tasks and events whose title, description or notes link to [url]. */
     suspend fun backlinks(url: String): List<Ref> {
         val target = AppLinks.parse(url)
-        // Our own links are matched by their fragment, so a different host in the text still counts.
-        val needle = target?.let { url.substring(url.indexOf('#')) } ?: url
-        val fromTasks = taskRepo.tasks().filter { (needle in it.title || needle in it.description) && !(target?.kind == RefKind.TASK && it.id.toString() == target.id) }
+        // Our own links are matched by their path (or old #fragment), so a different host in the text still counts.
+        val needles = when {
+            target == null || url.startsWith("mid:") -> listOf(url)
+            else -> url.substringAfter("://").substringAfter('/').removePrefix("#").let { path -> listOf("/$path", "#$path") }
+        }
+        val linked = { text: String -> needles.any { it in text } }
+        val fromTasks = taskRepo.tasks().filter { (linked(it.title) || linked(it.description)) && !(target?.kind == RefKind.TASK && it.id.toString() == target.id) }
             .map { Ref(RefKind.TASK, "#${it.number} ${plainText(it.title)}", AppLinks.task(base, it.id), date = it.updatedAt) }
-        val fromEvents = ws.snapshot().events.filter { needle in it.title || needle in it.notes }
+        val fromEvents = ws.snapshot().events.filter { linked(it.title) || linked(it.notes) }
             .map { Ref(RefKind.EVENT, plainText(it.title), AppLinks.event(base, it.uid), date = it.start) }
         return fromTasks + fromEvents
     }
