@@ -822,6 +822,10 @@
             "format" : "uuid",
             "type" : [ "string", "null" ]
           },
+          "sameAs" : {
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          },
           "start" : {
             "format" : "date-time",
             "type" : [ "string", "null" ]
@@ -1038,6 +1042,30 @@
         "required" : [ "displayName", "enabled", "intervalMinutes", "syncing", "type" ],
         "type" : "object"
       },
+      "SubmitRequest" : {
+        "properties" : {
+          "attachmentIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "link" : {
+            "type" : [ "string", "null" ]
+          },
+          "source" : {
+            "type" : "string"
+          },
+          "text" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "SyncReport" : {
         "properties" : {
           "completed" : {
@@ -1205,6 +1233,77 @@
           }
         },
         "required" : [ "createdAt", "id", "name" ],
+        "type" : "object"
+      },
+      "TriageInputResponse" : {
+        "properties" : {
+          "analyzedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "attachments" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AttachmentInfo"
+            },
+            "type" : "array"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TriageItemResponse"
+            },
+            "type" : "array"
+          },
+          "link" : {
+            "type" : [ "string", "null" ]
+          },
+          "source" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "text" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "attachments", "createdAt", "id", "items", "source", "status", "text", "title" ],
+        "type" : "object"
+      },
+      "TriageItemResponse" : {
+        "properties" : {
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "proposal" : {
+            "$ref" : "#/components/schemas/Proposal"
+          },
+          "result" : {
+            "type" : [ "string", "null" ]
+          },
+          "sameAs" : {
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "proposal", "status" ],
         "type" : "object"
       },
       "UpdateCalendarRequest" : {
@@ -2390,6 +2489,42 @@
         "tags" : [ "public-controller" ]
       }
     },
+    "/api/v1/public/triage" : {
+      "post" : {
+        "operationId" : "publicTriage",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Authorization",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SubmitRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Created"
+                }
+              }
+            },
+            "description" : "Accepted"
+          }
+        },
+        "tags" : [ "public-controller" ]
+      }
+    },
     "/api/v1/refs" : {
       "get" : {
         "operationId" : "search",
@@ -2821,6 +2956,166 @@
           }
         },
         "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/triage" : {
+      "get" : {
+        "operationId" : "triage",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/TriageInputResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      }
+    },
+    "/api/v1/triage/inputs" : {
+      "post" : {
+        "operationId" : "submitTriage",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SubmitRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageInputResponse"
+                }
+              }
+            },
+            "description" : "Accepted"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      }
+    },
+    "/api/v1/triage/inputs/{id}" : {
+      "delete" : {
+        "operationId" : "dismissTriage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      }
+    },
+    "/api/v1/triage/inputs/{id}/retry" : {
+      "post" : {
+        "operationId" : "retryTriage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageInputResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      }
+    },
+    "/api/v1/triage/items/{id}/accept" : {
+      "post" : {
+        "operationId" : "acceptTriage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Proposal"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      }
+    },
+    "/api/v1/triage/items/{id}/decline" : {
+      "post" : {
+        "operationId" : "declineTriage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "triage-controller" ]
       }
     }
   },

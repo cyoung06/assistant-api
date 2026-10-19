@@ -20,9 +20,11 @@ class FakeCaptureModel : CaptureModel {
     var next = LlmCapture()
     var lastInstructions = ""
     var lastImages = emptyList<CaptureImage>()
+    var failure: Exception? = null
     override suspend fun read(instructions: String, text: String, images: List<CaptureImage>): LlmCapture {
         lastInstructions = instructions
         lastImages = images
+        failure?.let { throw it }
         return next
     }
 }
@@ -33,6 +35,7 @@ class CaptureTest : ApiTestBase() {
     @BeforeEach
     fun reset() {
         model.configured = true
+        model.failure = null
         model.next = LlmCapture()
     }
 

@@ -83,5 +83,9 @@ data class AppProperties(
         val baseUrl: String = "https://chatgpt.com/backend-api/codex",
         val model: String = "gpt-6-luna",
         val timeout: Duration = Duration.ofSeconds(90),
+        /** At most this many Triage inputs are read a day; the rest wait for the next day. */
+        val triageDailyLimit: Int = 200,
+        /** How often Triage looks for inputs to read (new ones are read right away). */
+        val triageInterval: Duration = Duration.ofSeconds(30),
     )
 }

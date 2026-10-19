@@ -41,6 +41,12 @@ class PublicApiTest : ApiTestBase() {
         assertThat(getList("/api/v1/labels").single()["name"]).isEqualTo("reply")
         assertThat(getList("/api/v1/public-tokens").single()["lastUsed"]).isNotNull()
 
+        // The open mail goes to Triage; only a mid: link is kept as its source.
+        client.post().uri("/api/v1/public/triage").header("Host", publicHost).header("Authorization", "Bearer $token").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("title" to "Lab schedule", "text" to "Meeting moved to Thu 3pm", "link" to "mid:lab@postech.ac.kr"))
+            .exchange().expectStatus().isAccepted
+        assertThat(getList("/api/v1/triage").single()).containsEntry("source", "addin").containsEntry("title", "Lab schedule").containsEntry("link", "mid:lab@postech.ac.kr")
+
         val id = getList("/api/v1/public-tokens").single()["id"]
         delete("/api/v1/public-tokens/$id")
         client.get().uri("/api/v1/public/projects").header("Authorization", "Bearer $token").exchange().expectStatus().isUnauthorized

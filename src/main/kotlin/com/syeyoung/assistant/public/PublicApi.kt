@@ -16,6 +16,8 @@ import com.syeyoung.assistant.tasks.DueDto
 import com.syeyoung.assistant.tasks.LabelRequest
 import com.syeyoung.assistant.tasks.Priority
 import com.syeyoung.assistant.tasks.TaskService
+import com.syeyoung.assistant.triage.SubmitRequest
+import com.syeyoung.assistant.triage.TriageService
 import kotlinx.coroutines.flow.toList
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
@@ -153,7 +155,7 @@ data class Created(val id: String, val url: String)
 
 /**
  * The internet-facing endpoints, for the Outlook add-in: list projects, make a task, read a mail
- * with the model, make an event. Every call needs a token.
+ * with the model, send it to Triage, make an event. Every call needs a token.
  */
 @RestController
 @RequestMapping("/api/v1/public")
@@ -162,6 +164,7 @@ class PublicController(
     private val tasks: TaskService,
     private val capture: CaptureService,
     private val calendar: CalendarService,
+    private val triage: TriageService,
     private val props: AppProperties,
 ) {
     @GetMapping("/projects")
@@ -189,6 +192,17 @@ class PublicController(
         if (req.text.length > 50_000) throw ValidationException("Too long")
         // Text only from outside; attachments stay a tailnet thing.
         return capture.analyze(AnalyzeRequest(text = req.text))
+    }
+
+    /** Sends the open mail to Triage, read in the background like everything else; text only. */
+    @PostMapping("/triage")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    suspend fun publicTriage(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: SubmitRequest): Created {
+        tokens.authorize(auth)
+        if (req.text.length > 50_000 || req.title.length > 500) throw ValidationException("Too long")
+        val link = req.link?.takeIf { it.startsWith("mid:") }
+        val input = triage.submit(SubmitRequest(source = "addin", text = req.text, title = req.title, link = link))
+        return Created(input.id.toString(), "${props.publicUrl.trimEnd('/')}/triage")
     }
 
     @PostMapping("/events")

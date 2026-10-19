@@ -19,6 +19,7 @@ import com.syeyoung.assistant.tasks.AttachmentRepository
 import com.syeyoung.assistant.tasks.DueDto
 import com.syeyoung.assistant.tasks.Priority
 import com.syeyoung.assistant.tasks.TaskRepository
+import com.syeyoung.assistant.refs.plainText
 import kotlinx.coroutines.reactor.mono
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
@@ -75,6 +76,8 @@ data class LlmItem(
     val labels: List<String> = emptyList(),
     /** urgent, high, medium, low, or null. */
     val priority: String? = null,
+    /** The number of an open task this repeats, when the model was shown them. */
+    val sameAsTask: Long? = null,
 )
 
 /** An image (or more) and text to read. An interface so tests can stand in for the model. */
@@ -204,7 +207,7 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
                   "type": "array",
                   "items": {
                     "type": "object", "additionalProperties": false,
-                    "required": ["kind", "title", "description", "dueDate", "dueTime", "start", "end", "allDayDate", "project", "labels", "priority"],
+                    "required": ["kind", "title", "description", "dueDate", "dueTime", "start", "end", "allDayDate", "project", "labels", "priority", "sameAsTask"],
                     "properties": {
                       "kind": { "type": "string", "enum": ["task", "event"] },
                       "title": { "type": "string" },
@@ -216,7 +219,8 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
                       "allDayDate": { "type": ["string", "null"], "description": "YYYY-MM-DD" },
                       "project": { "type": ["string", "null"] },
                       "labels": { "type": "array", "items": { "type": "string" } },
-                      "priority": { "type": ["string", "null"], "enum": ["urgent", "high", "medium", "low", null] }
+                      "priority": { "type": ["string", "null"], "enum": ["urgent", "high", "medium", "low", null] },
+                      "sameAsTask": { "type": ["integer", "null"], "description": "number of the open task this repeats" }
                     }
                   }
                 }
@@ -247,6 +251,8 @@ data class Proposal(
     val projectId: UUID? = null,
     val labelIds: List<UUID> = emptyList(),
     val priority: Priority = Priority.NONE,
+    /** The number of an open task this seems to repeat. */
+    val sameAs: Long? = null,
 )
 
 data class AnalyzeResponse(val items: List<Proposal>)
@@ -262,8 +268,11 @@ class CaptureService(
     private val log = LoggerFactory.getLogger(javaClass)
     private val zone = props.zone
 
-    /** Reads shared text and screenshots and proposes tasks and events. Runs only when asked. */
-    suspend fun analyze(req: AnalyzeRequest): AnalyzeResponse {
+    /**
+     * Reads shared text and screenshots and proposes tasks and events. With [openTasks] (for
+     * Triage) the model also sees the open tasks, so it can say which one a proposal repeats.
+     */
+    suspend fun analyze(req: AnalyzeRequest, openTasks: Boolean = false): AnalyzeResponse {
         if (!model.available()) throw ConflictException("not_connected", "Connect ChatGPT in Sources to analyze")
         if (req.text.isBlank() && req.attachmentIds.isEmpty()) throw ValidationException("Nothing to analyze")
         val images = req.attachmentIds.map { id ->
@@ -287,7 +296,7 @@ class CaptureService(
             - project: one of these if it clearly fits, else null: ${projects.joinToString(", ") { "\"${it.name}\"" }.ifEmpty { "(none)" }}.
             - labels: any of these that fit: ${labels.joinToString(", ") { "\"${it.name}\"" }.ifEmpty { "(none)" }}.
             - priority: only if the source makes it clearly urgent or important.
-        """.trimIndent()
+        """.trimIndent() + openTaskList(openTasks)
         val result = try {
             model.read(instructions, req.text, images)
         } catch (e: ValidationException) {
@@ -307,10 +316,20 @@ class CaptureService(
                 projectId = item.project?.lowercase()?.let(projectByName::get)?.id,
                 labelIds = item.labels.mapNotNull { labelByName[it.lowercase()]?.id }.distinct(),
                 priority = item.priority?.let { p -> Priority.entries.find { it.wire == p.lowercase() } } ?: Priority.NONE,
+                sameAs = item.sameAsTask?.takeIf { openTasks },
             )
             if (item.kind == "event") event(item, base) ?: base.copy(due = due(item))
             else base.copy(due = due(item))
         })
+    }
+
+    /** The open tasks, one per line, for spotting repeats; empty unless asked. */
+    private suspend fun openTaskList(include: Boolean): String {
+        if (!include) return ""
+        val open = tasks.tasks().filter { !it.status.closed }.sortedByDescending { it.updatedAt }.take(150)
+        if (open.isEmpty()) return ""
+        val lines = open.joinToString("\n") { t -> "#${t.number} ${plainText(t.title)}" + (t.dueDate?.let { " (due $it)" } ?: "") }
+        return "\n- sameAsTask: if an item is already one of these open tasks, its number; else null. Still return the item.\n$lines"
     }
 
     private fun due(i: LlmItem): DueDto? {

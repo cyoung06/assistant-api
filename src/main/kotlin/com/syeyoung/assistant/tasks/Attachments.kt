@@ -75,9 +75,21 @@ class AttachmentRepository(private val db: DatabaseClient) {
         db.sql("delete from attachments where id = :id").bind("id", id).fetch().awaitRowsUpdated()
     }
 
+    /** Keeps uploads with a triage input until a suggestion from it is accepted. */
+    suspend fun holdForInput(inputId: UUID, ids: List<UUID>) {
+        if (ids.isEmpty()) return
+        db.sql("update attachments set triage_input_id = :input where id = any(:ids) and task_id is null")
+            .bind("input", inputId).bind("ids", ids.toTypedArray()).fetch().awaitRowsUpdated()
+    }
+
+    /** The uploads kept with a triage input. */
+    suspend fun forInput(inputId: UUID): List<AttachmentInfo> =
+        db.sql("select id, task_id, filename, content_type, size, created_at from attachments where triage_input_id = :input order by created_at")
+            .bind("input", inputId).map { r -> info(r) }.flow().toList()
+
     /** Uploads that never got attached to a task. */
     suspend fun deleteOrphans(before: Instant) {
-        db.sql("delete from attachments where task_id is null and created_at < :before").bind("before", before).fetch().awaitRowsUpdated()
+        db.sql("delete from attachments where task_id is null and triage_input_id is null and created_at < :before").bind("before", before).fetch().awaitRowsUpdated()
     }
 
     private fun info(r: io.r2dbc.spi.Readable) =
