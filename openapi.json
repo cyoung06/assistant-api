@@ -304,6 +304,63 @@
         "required" : [ "id", "url" ],
         "type" : "object"
       },
+      "DataBuffer" : { },
+      "DriveEntry" : {
+        "properties" : {
+          "contentType" : {
+            "type" : [ "string", "null" ]
+          },
+          "folder" : {
+            "type" : "boolean"
+          },
+          "modified" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "size" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "folder", "name", "path", "size" ],
+        "type" : "object"
+      },
+      "DriveFolder" : {
+        "properties" : {
+          "entries" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DriveEntry"
+            },
+            "type" : "array"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "entries", "path" ],
+        "type" : "object"
+      },
+      "DriveInfo" : {
+        "properties" : {
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "url" : {
+            "type" : "string"
+          },
+          "username" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "enabled", "url", "username" ],
+        "type" : "object"
+      },
       "DueDto" : {
         "properties" : {
           "date" : {
@@ -1651,6 +1708,133 @@
           }
         },
         "tags" : [ "chat-gpt-controller" ]
+      }
+    },
+    "/api/v1/drive" : {
+      "get" : {
+        "operationId" : "driveInfo",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DriveInfo"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/file" : {
+      "get" : {
+        "operationId" : "readFile",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/DataBuffer"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      },
+      "put" : {
+        "operationId" : "writeFile",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : { },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/folder" : {
+      "get" : {
+        "operationId" : "folder",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : false,
+          "schema" : {
+            "default" : "",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DriveFolder"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/projects/{id}" : {
+      "get" : {
+        "operationId" : "projectFolder",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "path",
+          "required" : false,
+          "schema" : {
+            "default" : "",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DriveFolder"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
       }
     },
     "/api/v1/events" : {

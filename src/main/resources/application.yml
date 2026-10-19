@@ -43,6 +43,11 @@ app:
     url: ${DAV_URL:http://localhost:5232}
     username: ${DAV_USERNAME:}
     password: ${DAV_PASSWORD:}
+  drive:
+    url: ${DRIVE_URL:}
+    public-url: ${DRIVE_PUBLIC_URL:}
+    username: ${DRIVE_USERNAME:}
+    password: ${DRIVE_PASSWORD:}
 
 management:
   endpoints:

@@ -69,6 +69,39 @@ class PlmsClient(
     suspend fun courses(): List<JsonNode> =
         call("core_course_get_enrolled_courses_by_timeline_classification", mapOf("classification" to "inprogress")).path("courses").toList()
 
+    @Volatile private var wsToken: String? = null
+
+    /**
+     * The token PLMS's own pages use for Moodle's REST web service (it's in every page for the
+     * logged-in user); course contents (with file download links) are only offered there.
+     */
+    private suspend fun wsToken(): String = wsToken ?: (WS_TOKEN.find(page("$baseUrl/my/"))?.groupValues?.get(1)
+        ?: throw PlmsException("PLMS pages carry no web service token")).also { wsToken = it }
+
+    /** A course's sections and their activities, files included (core_course_get_contents). */
+    suspend fun courseContents(courseId: Long): JsonNode {
+        repeat(2) {
+            val q = formEncode("wstoken" to wsToken(), "wsfunction" to "core_course_get_contents", "moodlewsrestformat" to "json", "courseid" to courseId.toString())
+            val root = mapper.readTree(send(HttpRequest.newBuilder(URI("$baseUrl/webservice/rest/server.php?$q")).GET()).body())
+            if (!root.isObject || !root.has("exception")) return root
+            // A stale token (a new session issues a new one): get a fresh one once.
+            wsToken = null
+            sesskey = null
+        }
+        throw PlmsException("PLMS course contents for $courseId: web service refused")
+    }
+
+    /** A course file's contents, from the download link course contents give. */
+    suspend fun download(fileUrl: String): HttpResponse<java.io.InputStream> {
+        val url = fileUrl + (if ('?' in fileUrl) "&" else "?") + "token=" + URLEncoder.encode(wsToken(), Charsets.UTF_8)
+        val r = http.sendAsync(
+            HttpRequest.newBuilder(URI(url)).timeout(Duration.ofMinutes(30)).header("User-Agent", USER_AGENT).GET().build(),
+            HttpResponse.BodyHandlers.ofInputStream(),
+        ).await()
+        if (r.statusCode() != 200) { r.body().close(); throw PlmsException("PLMS download: HTTP ${r.statusCode()}") }
+        return r
+    }
+
     /** A PLMS page's HTML, as the logged-in user sees it. */
     suspend fun page(url: String): String {
         if (sesskey == null) login()
@@ -133,6 +166,7 @@ class PlmsClient(
         const val USER_AGENT = "assistant-sync/1.0"
         val LOGIN_TOKEN = Regex("""name="logintoken" value="([^"]+)"""")
         val SESSKEY = Regex(""""sesskey":"([^"]+)"""")
+        val WS_TOKEN = Regex("""MOODLE_WSTOKEN = "([0-9a-f]+)"""")
         val SESSION_ERRORS = setOf("servicerequireslogin", "invalidsesskey", "requireloginerror", "sitepolicynotagreed")
     }
 }

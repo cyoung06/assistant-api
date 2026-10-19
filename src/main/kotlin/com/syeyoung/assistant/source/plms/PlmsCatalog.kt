@@ -39,6 +39,7 @@ class PlmsCatalog(
     private val projects: TaskSourceSync,
     private val clock: Clock,
     private val props: AppProperties,
+    private val files: PlmsFiles,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -85,6 +86,8 @@ class PlmsCatalog(
             }
         }
         index.replace(SOURCE, refs, Instant.now(clock))
+        // Course files into the courses' project folders (in the background: videos take a while).
+        files.importLater(courses.map { it.path("id").asLong() })
         log.info("PLMS catalog: {} references", refs.size)
         return refs.size
     }

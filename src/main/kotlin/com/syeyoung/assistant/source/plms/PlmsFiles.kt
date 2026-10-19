@@ -1,0 +1,138 @@
+package com.syeyoung.assistant.source.plms
+
+import com.syeyoung.assistant.drive.DriveService
+import com.syeyoung.assistant.drive.WebDav
+import com.syeyoung.assistant.source.SourceType
+import com.syeyoung.assistant.tasks.TaskRepository
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.slf4j.LoggerFactory
+import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.r2dbc.core.awaitRowsUpdated
+import org.springframework.r2dbc.core.flow
+import org.springframework.stereotype.Component
+import tools.jackson.databind.JsonNode
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+
+/**
+ * Course files from PLMS, copied into each course's project folder in the drive: Course files/,
+ * one folder per section of the course (as PLMS lists them). A file is copied once; if PLMS later
+ * has a newer version, it's copied again beside the old one ("name (updated 2026-10-21).pdf"), so a
+ * copy that was written on is never replaced.
+ */
+@Component
+class PlmsFiles(
+    private val plms: PlmsSource,
+    private val drive: DriveService,
+    private val dav: WebDav,
+    private val projects: TaskRepository,
+    private val db: DatabaseClient,
+    private val clock: Clock,
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lock = Mutex()
+
+    /** Copies new course files in the background (called after each catalog refresh). */
+    fun importLater(courseIds: List<Long>) {
+        if (!drive.enabled) return
+        scope.launch {
+            try {
+                import(courseIds)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.warn("PLMS files: {}", e.toString())
+            }
+        }
+    }
+
+    /** Copies what's new for each course; returns how many files were copied. */
+    suspend fun import(courseIds: List<Long>): Int = lock.withLock {
+        val byCourse = projects.projects().filter { it.sourceType == SourceType.PLMS.wire && it.sourceKey?.startsWith("course:") == true }
+            .associateBy { it.sourceKey!!.removePrefix("course:").toLong() }
+        val known = db.sql("select key, modified from plms_files").map { r -> r.get("key", String::class.java)!! to r.get("modified", java.lang.Long::class.java)!!.toLong() }
+            .flow().toList().toMap()
+        var copied = 0
+        for (course in courseIds) {
+            val project = byCourse[course] ?: continue
+            val folder = drive.folderOf(project.id) + "Course files/"
+            for (file in files(plms.client.courseContents(course))) {
+                val previous = known[file.key]
+                if (previous != null && previous >= file.modified) continue
+                val name = if (previous == null) file.name else updatedName(file.name, Instant.ofEpochSecond(file.modified))
+                val path = folder + file.subfolder + name
+                try {
+                    dav.makeFolders(path.substringBeforeLast('/'))
+                    plms.client.download(file.url).let { r -> r.body().use { dav.put(path, it, file.size.takeIf { s -> s > 0 }, file.mime) } }
+                    record(file, path)
+                    copied++
+                    log.info("PLMS file copied: {}", path)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log.warn("PLMS file {} not copied: {}", path, e.toString())
+                }
+            }
+        }
+        copied
+    }
+
+    private class CourseFile(val key: String, val url: String, val name: String, val subfolder: String, val size: Long, val modified: Long, val mime: String?)
+
+    /** The course's files: each file of its file, resource and folder activities, with the section it's in. */
+    private fun files(contents: JsonNode): List<CourseFile> = contents.flatMap { section ->
+        val sectionName = DriveService.safeName(section.path("name").asString(""))
+        // The course's general section (number 0) goes straight into Course files/.
+        val sub = if (section.path("section").asInt(0) == 0 || sectionName.isBlank()) "" else "$sectionName/"
+        section.path("modules").flatMap { module ->
+            module.path("contents").filter { it.path("type").asString("") == "file" && it.path("fileurl").asString("").isNotBlank() }.map { f ->
+                val inFolder = f.path("filepath").asString("/").trim('/').split('/').filter { it.isNotBlank() }.joinToString("") { DriveService.safeName(it) + "/" }
+                // A folder activity's files sit in a folder named after it.
+                val activity = if (module.path("modname").asString("") == "folder") DriveService.safeName(module.path("name").asString("Folder")) + "/" else ""
+                val name = DriveService.safeName(f.path("filename").asString("file"))
+                CourseFile(
+                    key = "${module.path("id").asLong()}/${f.path("filepath").asString("/")}${f.path("filename").asString("")}",
+                    url = f.path("fileurl").asString(""),
+                    name = name,
+                    subfolder = sub + activity + inFolder,
+                    size = f.path("filesize").asLong(0),
+                    modified = f.path("timemodified").asLong(0),
+                    mime = f.path("mimetype").asString(null),
+                )
+            }
+        }
+    }
+
+    private suspend fun record(f: CourseFile, path: String) {
+        db.sql(
+            """
+            insert into plms_files (key, path, modified, size, copied_at) values (:key, :path, :modified, :size, :now)
+            on conflict (key) do update set path = :path, modified = :modified, size = :size, copied_at = :now
+            """,
+        ).bind("key", f.key).bind("path", path).bind("modified", f.modified).bind("size", f.size).bind("now", Instant.now(clock)).fetch().awaitRowsUpdated()
+    }
+
+    @PreDestroy
+    fun stop() = scope.cancel()
+
+    companion object {
+        /** "Lecture 3.pdf" updated on a day: "Lecture 3 (updated 2026-10-21).pdf". */
+        fun updatedName(name: String, at: Instant, zone: ZoneId = ZoneId.of("Asia/Seoul")): String {
+            val day: LocalDate = at.atZone(zone).toLocalDate()
+            val dot = name.lastIndexOf('.')
+            return if (dot > 0) "${name.substring(0, dot)} (updated $day)${name.substring(dot)}" else "$name (updated $day)"
+        }
+    }
+}

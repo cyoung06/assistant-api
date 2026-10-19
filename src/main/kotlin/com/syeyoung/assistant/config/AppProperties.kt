@@ -18,7 +18,23 @@ data class AppProperties(
     val llm: Llm = Llm(),
     val github: Github = Github(),
     val dav: Dav = Dav(),
+    val drive: Drive = Drive(),
 ) {
+    /**
+     * The drive (WebDAV) holding project folders and course files: [url] as the API reaches it,
+     * [publicUrl] as devices do (for connecting Finder and the like). Without a password it's off.
+     */
+    data class Drive(
+        val url: String = "",
+        val publicUrl: String = "",
+        val username: String = "",
+        val password: String = "",
+        /** How often project folders are checked against the projects. */
+        val folderInterval: Duration = Duration.ofMinutes(2),
+    ) {
+        val enabled get() = url.isNotBlank() && password.isNotBlank()
+    }
+
     /** The CalDAV server (Radicale) holding events and todos. */
     data class Dav(
         val url: String = "http://localhost:5232",
