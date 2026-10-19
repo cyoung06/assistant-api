@@ -37,6 +37,7 @@ class PlmsFiles(
     private val drive: DriveService,
     private val dav: WebDav,
     private val projects: TaskRepository,
+    private val sources: com.syeyoung.assistant.source.SourceRepository,
     private val db: DatabaseClient,
     private val clock: Clock,
 ) {
@@ -45,11 +46,11 @@ class PlmsFiles(
     private val lock = Mutex()
 
     /** Copies new course files in the background (called after each catalog refresh). */
-    fun importLater(courseIds: List<Long>) {
+    fun importLater(courses: List<Pair<Long, String>>) {
         if (!drive.enabled) return
         scope.launch {
             try {
-                import(courseIds)
+                import(courses)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -59,14 +60,18 @@ class PlmsFiles(
     }
 
     /** Copies what's new for each course; returns how many files were copied. */
-    suspend fun import(courseIds: List<Long>): Int = lock.withLock {
-        val byCourse = projects.projects().filter { it.sourceType == SourceType.PLMS.wire && it.sourceKey?.startsWith("course:") == true }
-            .associateBy { it.sourceKey!!.removePrefix("course:").toLong() }
+    suspend fun import(courses: List<Pair<Long, String>>): Int = lock.withLock {
+        val all = projects.projects()
+        // The course's project: the one keyed to it, else the one the sync linked by the course's
+        // name (a project that existed before PLMS was connected keeps its own source).
+        val linked = sources.refs(SourceType.PLMS)
+        fun projectOf(id: Long, name: String) = all.find { it.sourceType == SourceType.PLMS.wire && it.sourceKey == "course:$id" }
+            ?: linked["${SourceType.PLMS.wire}:project:$name"]?.let { uid -> all.find { it.id.toString() == uid } }
         val known = db.sql("select key, modified from plms_files").map { r -> r.get("key", String::class.java)!! to r.get("modified", java.lang.Long::class.java)!!.toLong() }
             .flow().toList().toMap()
         var copied = 0
-        for (course in courseIds) {
-            val project = byCourse[course] ?: continue
+        for ((course, courseName) in courses) {
+            val project = projectOf(course, courseName) ?: continue
             val folder = drive.folderOf(project.id) + "Course files/"
             for (file in files(plms.client.courseContents(course))) {
                 val previous = known[file.key]

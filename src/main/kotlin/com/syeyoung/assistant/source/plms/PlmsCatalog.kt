@@ -87,7 +87,7 @@ class PlmsCatalog(
         }
         index.replace(SOURCE, refs, Instant.now(clock))
         // Course files into the courses' project folders (in the background: videos take a while).
-        files.importLater(courses.map { it.path("id").asLong() })
+        files.importLater(courses.map { it.path("id").asLong() to PlmsSource.courseName(it.path("fullname").asString("")) })
         log.info("PLMS catalog: {} references", refs.size)
         return refs.size
     }
