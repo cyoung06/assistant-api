@@ -11,6 +11,7 @@ import com.syeyoung.assistant.ical.Freq
 import com.syeyoung.assistant.ical.RepeatRule
 import com.syeyoung.assistant.source.SourceRepository
 import com.syeyoung.assistant.source.ical.IcalSource
+import com.syeyoung.assistant.tasks.TaskRepository
 import com.syeyoung.assistant.tasks.validColor
 import org.springframework.format.annotation.DateTimeFormat
 import org.springframework.http.HttpStatus
@@ -27,12 +28,15 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import java.time.Clock
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 
 // ---- API shapes ------------------------------------------------------------------
 
@@ -65,6 +69,7 @@ data class EventOccurrence(
     val repeats: Boolean,
     /** From a source (e.g. holidays): can't be changed here. */
     val fixed: Boolean,
+    val projectId: UUID? = null,
     val start: OffsetDateTime? = null,
     val end: OffsetDateTime? = null,
     val startDate: LocalDate? = null,
@@ -86,6 +91,7 @@ data class EventResponse(
     /** Null for a repeating event whose rule is beyond what can be edited here. */
     val repeat: RepeatDto? = null,
     val url: String? = null,
+    val projectId: UUID? = null,
     val start: OffsetDateTime? = null,
     val end: OffsetDateTime? = null,
     val startDate: LocalDate? = null,
@@ -102,7 +108,29 @@ data class CreateEventRequest(
     val endDate: LocalDate? = null,
     val categories: List<String> = emptyList(),
     val repeat: RepeatDto? = null,
+    val projectId: UUID? = null,
 )
+
+/** A repeating event of a project in one line's worth: e.g. Tue · Thu 12:30–13:45. */
+data class RecurringSummary(
+    val eventId: String,
+    val title: String,
+    val freq: Freq,
+    val interval: Int,
+    val weekdays: List<DayOfWeek>,
+    /** Local times; null for all-day events. */
+    val start: LocalTime? = null,
+    val end: LocalTime? = null,
+)
+
+/** A skipped occurrence of a project's repeating event (e.g. no class that day). */
+data class SkippedOccurrence(val eventId: String, val title: String, val date: LocalDate)
+
+/**
+ * What a project page shows of the calendar: its repeating events summed up rather than listed,
+ * and the one-off events and skipped occurrences coming up.
+ */
+data class ProjectSchedule(val recurring: List<RecurringSummary>, val upcoming: List<EventOccurrence>, val skipped: List<SkippedOccurrence>)
 
 // ---- service ----------------------------------------------------------------------
 
@@ -110,6 +138,8 @@ data class CreateEventRequest(
 class CalendarService(
     private val ws: Workspace,
     private val sources: SourceRepository,
+    private val tasks: TaskRepository,
+    private val clock: Clock,
     private val mapper: ObjectMapper,
 ) {
     private val zone get() = ws.zone
@@ -136,6 +166,7 @@ class CalendarService(
             EventOccurrence(
                 id = o.event.uid, title = o.event.title, calendarId = o.event.calendarId, calendarName = cal?.name.orEmpty(), color = cal?.color,
                 categories = o.event.categories, repeats = o.event.repeats, fixed = o.event.calendarId in fixed,
+                projectId = o.event.projectId?.let(::uuidOrNull),
                 start = o.start?.atZone(zone)?.toOffsetDateTime(), end = o.end?.atZone(zone)?.toOffsetDateTime(),
                 startDate = o.startDate, endDate = o.endDate,
             )
@@ -151,6 +182,7 @@ class CalendarService(
             id = e.uid, title = e.title, notes = e.notes, calendarId = e.calendarId, calendarName = cal?.name.orEmpty(), color = cal?.color,
             categories = e.categories, fixed = e.calendarId in sources.sourceCalendarIds(), repeats = e.repeats,
             repeat = rule?.value("RRULE")?.let { r -> toRepeat(r, ws.fieldsOf(e, rule).exdates) }, url = e.url,
+            projectId = e.projectId?.let(::uuidOrNull),
             start = e.start?.atZone(zone)?.toOffsetDateTime(), end = e.end?.atZone(zone)?.toOffsetDateTime(),
             startDate = e.startDate, endDate = e.endDate,
         )
@@ -159,7 +191,8 @@ class CalendarService(
     /** New events go in the assistant's own calendar. */
     suspend fun create(req: CreateEventRequest): EventResponse {
         val title = req.title.trim().ifEmpty { throw ValidationException("Title is required") }
-        var f = Workspace.EventFields(title, req.notes, categories = req.categories)
+        req.projectId?.let { checkProject(it) }
+        var f = Workspace.EventFields(title, req.notes, categories = req.categories, projectId = req.projectId?.toString())
         f = withTime(f, req.start, req.end, req.startDate, req.endDate)
         req.repeat?.let { f = withRepeat(f, it) }
         return event(ws.createEvent(ws.assistantCalendar().id, f).uid)
@@ -167,21 +200,24 @@ class CalendarService(
 
     /**
      * Merge patch: title, notes, categories, start+end or startDate+endDate (for a repeating event,
-     * the first occurrence), repeat (null stops repeating).
+     * the first occurrence), repeat (null stops repeating), projectId (null unlinks).
      */
     suspend fun update(id: String, patch: JsonNode): EventResponse {
         if (!patch.isObject) throw ValidationException("Patch body must be a JSON object")
         val e = editable(id)
         fun date(name: String) = patch.get(name)?.takeUnless { it.isNull }?.let { mapper.treeToValue(it, LocalDate::class.java) }
         fun time(name: String) = patch.get(name)?.takeUnless { it.isNull }?.let { mapper.treeToValue(it, OffsetDateTime::class.java) }
-        val known = setOf("title", "notes", "categories", "start", "end", "startDate", "endDate", "repeat")
+        val known = setOf("title", "notes", "categories", "start", "end", "startDate", "endDate", "repeat", "projectId")
         patch.properties().map { it.key }.find { it !in known }?.let { throw ValidationException("Unknown field '$it'") }
+        val project = patch.get("projectId")?.takeUnless { it.isNull }?.asString()
+            ?.let { uuidOrNull(it) ?: throw ValidationException("Not an ID: '$it'") }?.also { checkProject(it) }
         try {
             ws.updateEvent(e) { current ->
                 var f = current
                 patch.get("title")?.let { f = f.copy(title = it.asString().trim().ifEmpty { throw ValidationException("Title is required") }) }
                 patch.get("notes")?.let { f = f.copy(notes = it.takeUnless { n -> n.isNull }?.asString().orEmpty()) }
                 patch.get("categories")?.let { n -> f = f.copy(categories = (0 until n.size()).map { n.get(it).asString() }) }
+                if (patch.has("projectId")) f = f.copy(projectId = project?.toString())
                 if (patch.has("start") || patch.has("startDate")) f = withTime(f, time("start"), time("end"), date("startDate"), date("endDate"))
                 if (patch.has("repeat")) {
                     val r = patch.get("repeat").takeUnless { it.isNull }?.let { mapper.treeToValue(it, RepeatDto::class.java) }
@@ -199,6 +235,41 @@ class CalendarService(
         val e = editable(id)
         ws.delete(e.href, e.etag)
     }
+
+    /** The project's events for a page: repeating ones summed up, then the next [days] days' one-off events and skipped dates. */
+    suspend fun projectSchedule(projectId: UUID, days: Long): ProjectSchedule {
+        checkProject(projectId)
+        val s = ws.snapshot()
+        val today = LocalDate.now(clock.withZone(zone))
+        val last = today.plusDays(days.coerceIn(1, 120) - 1)
+        val mine = s.events.filter { it.projectId == projectId.toString() }
+        val recurring = mutableListOf<RecurringSummary>()
+        val skipped = mutableListOf<SkippedOccurrence>()
+        for (e in mine.filter { it.repeats }) {
+            val doc = s.docs[e.href]?.main ?: continue
+            val rule = doc.value("RRULE")?.let { IcalSource.parseRule(it, zone) } ?: continue
+            if (rule.until != null && rule.until < today) continue
+            val first = e.startDate ?: e.start!!.atZone(zone).toLocalDate()
+            recurring += RecurringSummary(
+                e.uid, e.title, rule.freq, rule.interval,
+                rule.weekdays.ifEmpty { if (rule.freq == Freq.WEEKLY) setOf(first.dayOfWeek) else emptySet() }.sorted(),
+                e.start?.atZone(zone)?.toLocalTime(), e.end?.atZone(zone)?.toLocalTime(),
+            )
+            ws.fieldsOf(e, doc).exdates.filter { it in today..last }.forEach { skipped += SkippedOccurrence(e.uid, e.title, it) }
+        }
+        val upcoming = occurrences(today, last).filter { it.projectId == projectId && !it.repeats }
+        return ProjectSchedule(
+            recurring.sortedWith(compareBy({ it.weekdays.firstOrNull() }, { it.start })),
+            upcoming,
+            skipped.sortedBy { it.date },
+        )
+    }
+
+    private suspend fun checkProject(id: UUID) {
+        tasks.project(id) ?: throw ValidationException("No project $id")
+    }
+
+    private fun uuidOrNull(s: String) = runCatching { UUID.fromString(s) }.getOrNull()
 
     private suspend fun editable(id: String): Event {
         val e = ws.findEvent(id) ?: throw NotFoundException("Event", id)
@@ -275,4 +346,8 @@ class CalendarController(private val service: CalendarService) {
     @DeleteMapping("/events/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     suspend fun deleteEvent(@PathVariable id: String) = service.delete(id)
+
+    /** The project's calendar: repeating events summed up, one-off events and skipped dates in the next [days] days. */
+    @GetMapping("/projects/{id}/schedule")
+    suspend fun projectSchedule(@PathVariable id: UUID, @RequestParam(defaultValue = "28") days: Long): ProjectSchedule = service.projectSchedule(id, days)
 }

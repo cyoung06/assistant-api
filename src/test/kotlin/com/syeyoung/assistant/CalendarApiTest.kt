@@ -88,4 +88,36 @@ class CalendarApiTest : ApiTestBase() {
             .exchange().expectStatus().isBadRequest
         client.get().uri("/api/v1/events?from=2026-10-20&to=2026-10-19").exchange().expectStatus().isBadRequest
     }
+
+    @Test
+    fun `a project's schedule sums up its lectures and lists only what's coming up`() {
+        val course = post("/api/v1/projects", mapOf("name" to "확률및통계"))
+        val lecture = post(
+            "/api/v1/events",
+            mapOf(
+                "title" to "확률및통계", "start" to "2026-09-01T12:30:00+09:00", "end" to "2026-09-01T13:45:00+09:00", "projectId" to course["id"],
+                "repeat" to mapOf("freq" to "weekly", "weekdays" to listOf("TUESDAY", "THURSDAY"), "until" to "2026-12-18", "skipped" to listOf("2026-10-29", "2026-09-03")),
+            ),
+        )
+        assertThat(raw(lecture["id"] as String)).contains("X-ASSISTANT-PROJECT:${course["id"]}")
+        val exam = post("/api/v1/events", mapOf("title" to "Midterm", "start" to "2026-10-30T10:00:00+09:00", "end" to "2026-10-30T12:00:00+09:00", "projectId" to course["id"]))
+        post("/api/v1/events", mapOf("title" to "Final", "start" to "2026-12-15T10:00:00+09:00", "end" to "2026-12-15T12:00:00+09:00", "projectId" to course["id"]))
+        post("/api/v1/events", mapOf("title" to "Dentist", "start" to "2026-10-21T10:00:00+09:00", "end" to "2026-10-21T11:00:00+09:00"))
+
+        // Today is Sunday 2026-10-18; the next four weeks.
+        val schedule = get("/api/v1/projects/${course["id"]}/schedule")
+        assertThat(schedule["recurring"] as List<*>).singleElement().isEqualTo(
+            mapOf("eventId" to lecture["id"], "title" to "확률및통계", "freq" to "weekly", "interval" to 1, "weekdays" to listOf("TUESDAY", "THURSDAY"), "start" to "12:30:00", "end" to "13:45:00"),
+        )
+        assertThat((schedule["upcoming"] as List<*>).map { (it as Map<*, *>)["title"] }).containsExactly("Midterm")
+        assertThat(schedule["skipped"] as List<*>).singleElement().isEqualTo(mapOf("eventId" to lecture["id"], "title" to "확률및통계", "date" to "2026-10-29"))
+
+        // Occurrences carry the project; unlinking takes the event off the page.
+        assertThat(events("2026-10-30", "2026-10-30").single()).containsEntry("projectId", course["id"])
+        patch("/api/v1/events/${exam["id"]}", mapOf("projectId" to null))
+        assertThat(get("/api/v1/projects/${course["id"]}/schedule")["upcoming"] as List<*>).isEmpty()
+        client.post().uri("/api/v1/events").contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(mapOf("title" to "x", "startDate" to "2026-10-20", "projectId" to "00000000-0000-0000-0000-000000000000"))
+            .exchange().expectStatus().isBadRequest
+    }
 }

@@ -137,6 +137,10 @@
           "notes" : {
             "type" : "string"
           },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
           "repeat" : {
             "oneOf" : [ {
               "$ref" : "#/components/schemas/RepeatDto"
@@ -339,6 +343,10 @@
           "id" : {
             "type" : "string"
           },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
           "repeats" : {
             "type" : "boolean"
           },
@@ -390,6 +398,10 @@
           },
           "notes" : {
             "type" : "string"
+          },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
           },
           "repeat" : {
             "oneOf" : [ {
@@ -748,6 +760,30 @@
         "required" : [ "color", "description", "doneCount", "id", "initiativeIds", "name", "state", "taskCount" ],
         "type" : "object"
       },
+      "ProjectSchedule" : {
+        "properties" : {
+          "recurring" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RecurringSummary"
+            },
+            "type" : "array"
+          },
+          "skipped" : {
+            "items" : {
+              "$ref" : "#/components/schemas/SkippedOccurrence"
+            },
+            "type" : "array"
+          },
+          "upcoming" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EventOccurrence"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "recurring", "skipped", "upcoming" ],
+        "type" : "object"
+      },
       "Proposal" : {
         "properties" : {
           "description" : {
@@ -831,6 +867,41 @@
         "required" : [ "name", "usedPercent" ],
         "type" : "object"
       },
+      "RecurringSummary" : {
+        "properties" : {
+          "end" : {
+            "format" : "time-local",
+            "type" : [ "string", "null" ]
+          },
+          "eventId" : {
+            "type" : "string"
+          },
+          "freq" : {
+            "enum" : [ "daily", "weekly", "monthly" ],
+            "type" : "string"
+          },
+          "interval" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "start" : {
+            "format" : "time-local",
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "weekdays" : {
+            "items" : {
+              "enum" : [ "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY" ],
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "eventId", "freq", "interval", "title", "weekdays" ],
+        "type" : "object"
+      },
       "Ref" : {
         "properties" : {
           "context" : {
@@ -904,6 +975,22 @@
             "type" : "array"
           }
         },
+        "type" : "object"
+      },
+      "SkippedOccurrence" : {
+        "properties" : {
+          "date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "eventId" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "date", "eventId", "title" ],
         "type" : "object"
       },
       "SourceStatus" : {
@@ -2056,6 +2143,42 @@
           }
         },
         "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/projects/{id}/schedule" : {
+      "get" : {
+        "operationId" : "projectSchedule",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "days",
+          "required" : false,
+          "schema" : {
+            "default" : 28,
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProjectSchedule"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "calendar-controller" ]
       }
     },
     "/api/v1/public-tokens" : {

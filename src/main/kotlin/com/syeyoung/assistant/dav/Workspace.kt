@@ -46,6 +46,8 @@ data class Event(
     val categories: List<String>,
     val url: String?,
     val sourceRef: String?,
+    /** The project it belongs to (e.g. a course's lectures or exam), kept in [Workspace.PROJECT_PROP]. */
+    val projectId: String? = null,
 )
 
 /** One concrete occurrence of an event within a range. */
@@ -113,6 +115,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
             categories = categoriesOf(c),
             url = c.value("URL"),
             sourceRef = c.value(SOURCE_PROP),
+            projectId = c.value(PROJECT_PROP),
         )
     }
 
@@ -181,6 +184,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         /** An RRULE value, e.g. "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261225T145959Z". */
         val rrule: String? = null,
         val exdates: List<LocalDate> = emptyList(),
+        val projectId: String? = null,
     )
 
     suspend fun createEvent(calendarId: String, f: EventFields, uid: String = newUid()): Event {
@@ -264,11 +268,13 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         setCategories(c, f.categories)
         c.set("URL", f.url)
         c.set(SOURCE_PROP, f.sourceRef)
+        c.set(PROJECT_PROP, f.projectId)
     }
 
     fun fieldsOf(e: Event, c: IcsDocument.Comp) = EventFields(
         e.title, e.notes, e.start, e.end, e.startDate, e.endDate, e.categories, e.url, e.sourceRef,
         rrule = c.value("RRULE"),
+        projectId = e.projectId,
         exdates = c.all("EXDATE").flatMap { p -> p.value.split(',').mapNotNull { v -> dateOf(IcsDocument.Prop("EXDATE", p.params, v)) ?: instantOf(IcsDocument.Prop("EXDATE", p.params, v))?.atZone(zone)?.toLocalDate() } },
     )
 
@@ -358,6 +364,8 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         const val SOURCE_PROP = "X-ASSISTANT-SOURCE"
         /** The title with its references, when it has any (SUMMARY holds the plain text). */
         const val TITLE_PROP = "X-ASSISTANT-TITLE"
+        /** The project an event belongs to; other calendar apps ignore it. */
+        const val PROJECT_PROP = "X-ASSISTANT-PROJECT"
         const val ASSISTANT_SLUG = "assistant"
         private const val CACHE_SECONDS = 15L
         private const val SPAN_SLACK = 31L
