@@ -23,7 +23,18 @@ import org.slf4j.LoggerFactory
 import org.springframework.ai.mcp.server.webflux.transport.WebFluxStatelessServerTransport
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.io.buffer.DataBuffer
+import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.core.io.buffer.DefaultDataBufferFactory
+import org.springframework.http.HttpMethod
+import org.springframework.http.MediaType
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.web.reactive.function.server.RouterFunction
+import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.WebFilter
+import org.springframework.web.server.WebFilterChain
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import tools.jackson.databind.json.JsonMapper
 import java.time.Clock
 import java.time.LocalDate
@@ -62,6 +73,41 @@ class McpServerConfig {
             .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
             .tools(tools.all(mapper))
             .build()
+}
+
+/**
+ * Answers JSON-RPC requests the MCP SDK doesn't handle (e.g. "server/discover", which ChatGPT tries
+ * first) with the standard "method not found" error, so the client falls back to "initialize";
+ * the SDK's transport would answer them with an HTTP 500 instead.
+ */
+@org.springframework.stereotype.Component
+class McpUnknownMethods(private val json: JsonMapper) : WebFilter {
+    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
+        if (exchange.request.path.value() != "/mcp" || exchange.request.method != HttpMethod.POST) return chain.filter(exchange)
+        return DataBufferUtils.join(exchange.request.body).defaultIfEmpty(DefaultDataBufferFactory.sharedInstance.wrap(ByteArray(0))).flatMap { buffer ->
+            val bytes = ByteArray(buffer.readableByteCount()).also(buffer::read)
+            DataBufferUtils.release(buffer)
+            val message = runCatching { json.readTree(bytes) }.getOrNull()
+            val method = message?.path("method")?.asString(null)
+            val id = message?.get("id")
+            if (method != null && id != null && !id.isNull && method !in HANDLED) {
+                val error = mapOf("jsonrpc" to "2.0", "id" to json.treeToValue(id, Any::class.java), "error" to mapOf("code" to -32601, "message" to "Method not found: $method"))
+                exchange.response.headers.contentType = MediaType.APPLICATION_JSON
+                exchange.response.writeWith(Mono.just(exchange.response.bufferFactory().wrap(json.writeValueAsBytes(error))))
+            } else {
+                // The body was read here, so the request goes on with it again.
+                val request = object : ServerHttpRequestDecorator(exchange.request) {
+                    override fun getBody(): Flux<DataBuffer> = Flux.just(exchange.response.bufferFactory().wrap(bytes))
+                }
+                chain.filter(exchange.mutate().request(request).build())
+            }
+        }
+    }
+
+    private companion object {
+        /** What the stateless server answers (notifications, having no id, pass through anyway). */
+        val HANDLED = setOf("initialize", "ping", "tools/list", "tools/call")
+    }
 }
 
 @org.springframework.stereotype.Component

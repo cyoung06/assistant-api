@@ -21,6 +21,15 @@ class McpTest : ApiTestBase() {
     }
 
     @Test
+    fun `methods the server doesn't know get a JSON-RPC error, not an HTTP failure`() {
+        val reply = rpc("server/discover")
+        @Suppress("UNCHECKED_CAST")
+        assertThat(reply["error"] as Map<String, Any?>).containsEntry("code", -32601)
+        assertThat(reply["id"]).isEqualTo(id)
+        assertThat(rpc("ping")).containsKey("result")
+    }
+
+    @Test
     fun `ChatGPT reads tasks, projects and events, and can only send things to Triage`() {
         val init = rpc("initialize", mapOf("protocolVersion" to "2025-06-18", "capabilities" to emptyMap<String, Any>(), "clientInfo" to mapOf("name" to "test", "version" to "1")))
         @Suppress("UNCHECKED_CAST")
