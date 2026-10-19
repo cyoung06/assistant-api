@@ -89,7 +89,7 @@ abstract class ApiTestBase {
     @BeforeEach
     fun setUp() {
         runBlocking {
-            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations, mail_accounts, chatgpt_accounts, ref_index, attachments, public_tokens").await()
+            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations, mail_accounts, chatgpt_accounts, initiatives, project_initiatives, ref_index, attachments, public_tokens").await()
             db.sql("alter sequence task_number restart").await()
             // Every test starts with an empty CalDAV home.
             dav.collections().forEach { dav.deleteCollection(it.href) }

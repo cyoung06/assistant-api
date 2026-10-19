@@ -42,6 +42,18 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
         fun courseName(fullName: String): String =
             fullName.replace(COURSE_SUFFIX, "").trim().ifEmpty { fullName.trim() }
 
+        /**
+         * The semester a course starting on [start] belongs to, as POSTECH's calendar runs: spring from
+         * February, summer session from June, fall from August, winter session from December.
+         */
+        fun semester(start: java.time.LocalDate): String = when (start.monthValue) {
+            in 2..5 -> "${start.year} Spring"
+            6, 7 -> "${start.year} Summer"
+            in 8..11 -> "${start.year} Fall"
+            12 -> "${start.year} Winter"
+            else -> "${start.year - 1} Winter"
+        }
+
         /** "HW6 is due" → "HW6". */
         fun cleanTitle(name: String): String = name.replace(TITLE_SUFFIX, "").trim().ifEmpty { name.trim() }
 

@@ -159,6 +159,33 @@
         "required" : [ "title" ],
         "type" : "object"
       },
+      "CreateInitiativeRequest" : {
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "projectIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "status" : {
+            "enum" : [ "planned", "active", "completed" ],
+            "type" : "string"
+          },
+          "targetDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "name" ],
+        "type" : "object"
+      },
       "CreateProjectRequest" : {
         "properties" : {
           "color" : {
@@ -166,6 +193,13 @@
           },
           "description" : {
             "type" : "string"
+          },
+          "initiativeIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "name" : {
             "type" : "string"
@@ -396,6 +430,45 @@
           }
         },
         "required" : [ "createdAt", "path" ],
+        "type" : "object"
+      },
+      "InitiativeResponse" : {
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "doneCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "projectIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "status" : {
+            "enum" : [ "planned", "active", "completed" ],
+            "type" : "string"
+          },
+          "targetDate" : {
+            "format" : "date",
+            "type" : [ "string", "null" ]
+          },
+          "taskCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "description", "doneCount", "id", "name", "projectIds", "status", "taskCount" ],
         "type" : "object"
       },
       "JsonNode" : {
@@ -650,6 +723,13 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "initiativeIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "name" : {
             "type" : "string"
           },
@@ -665,7 +745,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "color", "description", "doneCount", "id", "name", "state", "taskCount" ],
+        "required" : [ "color", "description", "doneCount", "id", "initiativeIds", "name", "state", "taskCount" ],
         "type" : "object"
       },
       "Proposal" : {
@@ -1054,6 +1134,13 @@
           },
           "description" : {
             "type" : [ "string", "null" ]
+          },
+          "initiativeIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : [ "array", "null" ]
           },
           "name" : {
             "type" : [ "string", "null" ]
@@ -1538,6 +1625,134 @@
           }
         },
         "tags" : [ "feed-controller" ]
+      }
+    },
+    "/api/v1/initiatives" : {
+      "get" : {
+        "operationId" : "initiatives",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/InitiativeResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "post" : {
+        "operationId" : "createInitiative",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateInitiativeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InitiativeResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/initiatives/{id}" : {
+      "delete" : {
+        "operationId" : "deleteInitiative",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "get" : {
+        "operationId" : "initiative",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InitiativeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
+      },
+      "patch" : {
+        "operationId" : "updateInitiative",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JsonNode"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InitiativeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "task-controller" ]
       }
     },
     "/api/v1/labels" : {

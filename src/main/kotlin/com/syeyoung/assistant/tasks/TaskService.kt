@@ -182,17 +182,21 @@ class TaskService(
 
     suspend fun projects(): List<ProjectResponse> {
         val tasks = repo.tasks()
-        return repo.projects().map { renderProject(it, tasks) }
+        val links = repo.projectInitiatives()
+        return repo.projects().map { renderProject(it, tasks, links) }
     }
 
-    suspend fun project(id: UUID): ProjectResponse = renderProject(repo.project(id) ?: throw NotFoundException("Project", id), repo.tasks())
+    suspend fun project(id: UUID): ProjectResponse =
+        renderProject(repo.project(id) ?: throw NotFoundException("Project", id), repo.tasks(), repo.projectInitiatives())
 
     @Transactional
     suspend fun createProject(req: CreateProjectRequest): ProjectResponse {
         val name = req.name.trim().ifEmpty { throw ValidationException("Name is required") }
         val color = req.color?.let(::validColor) ?: leastUsed(repo.projects().map { it.color })
+        checkInitiatives(req.initiativeIds)
         val p = ProjectRow(UUID.randomUUID(), name, req.description, color, req.state, null, null)
         repo.insertProject(p, Instant.now(clock))
+        repo.setProjectInitiatives(p.id, req.initiativeIds)
         return project(p.id)
     }
 
@@ -208,6 +212,7 @@ class TaskService(
             ),
             Instant.now(clock),
         )
+        req.initiativeIds?.let { checkInitiatives(it); repo.setProjectInitiatives(id, it) }
         return project(id)
     }
 
@@ -215,6 +220,71 @@ class TaskService(
     suspend fun deleteProject(id: UUID) {
         repo.project(id) ?: throw NotFoundException("Project", id)
         repo.deleteProject(id)
+    }
+
+    private suspend fun checkInitiatives(ids: List<UUID>) {
+        val known = repo.initiatives().map { it.id }.toSet()
+        ids.firstOrNull { it !in known }?.let { throw ValidationException("No initiative $it") }
+    }
+
+    // ---- initiatives ----------------------------------------------------------------
+
+    suspend fun initiatives(): List<InitiativeResponse> {
+        val tasks = repo.tasks()
+        val links = repo.projectInitiatives()
+        return repo.initiatives().map { renderInitiative(it, tasks, links) }
+    }
+
+    suspend fun initiative(id: UUID): InitiativeResponse =
+        renderInitiative(repo.initiative(id) ?: throw NotFoundException("Initiative", id), repo.tasks(), repo.projectInitiatives())
+
+    @Transactional
+    suspend fun createInitiative(req: CreateInitiativeRequest): InitiativeResponse {
+        val name = req.name.trim().ifEmpty { throw ValidationException("Name is required") }
+        checkProjects(req.projectIds)
+        val i = InitiativeRow(UUID.randomUUID(), name, req.description, req.status, req.targetDate)
+        repo.insertInitiative(i, Instant.now(clock))
+        repo.setInitiativeProjects(i.id, req.projectIds)
+        return initiative(i.id)
+    }
+
+    /** Merge patch: name, description, status, targetDate (null clears it), projectIds (replaces them). */
+    @Transactional
+    suspend fun updateInitiative(id: UUID, patch: JsonNode): InitiativeResponse {
+        if (!patch.isObject) throw ValidationException("Patch body must be a JSON object")
+        var i = repo.initiative(id) ?: throw NotFoundException("Initiative", id)
+        var projects: List<UUID>? = null
+        for ((name, value) in patch.properties()) {
+            val n = value.takeUnless { it.isNull }
+            i = when (name) {
+                "name" -> i.copy(name = n?.asString()?.trim()?.ifEmpty { null } ?: throw ValidationException("Name is required"))
+                "description" -> i.copy(description = n?.asString().orEmpty())
+                "status" -> i.copy(status = InitiativeStatus.of(n?.asString() ?: throw ValidationException("Status is required")))
+                "targetDate" -> i.copy(targetDate = n?.let { runCatching { LocalDate.parse(it.asString()) }.getOrElse { throw ValidationException("targetDate must be YYYY-MM-DD") } })
+                "projectIds" -> { projects = n?.let { a -> (0 until a.size()).map { uuid(a.get(it).asString()) } }.orEmpty(); i }
+                else -> throw ValidationException("Unknown or read-only field '$name'")
+            }
+        }
+        repo.updateInitiative(i, Instant.now(clock))
+        projects?.let { checkProjects(it); repo.setInitiativeProjects(id, it) }
+        return initiative(id)
+    }
+
+    @Transactional
+    suspend fun deleteInitiative(id: UUID) {
+        repo.initiative(id) ?: throw NotFoundException("Initiative", id)
+        repo.deleteInitiative(id)
+    }
+
+    private suspend fun checkProjects(ids: List<UUID>) {
+        val known = repo.projects().map { it.id }.toSet()
+        ids.firstOrNull { it !in known }?.let { throw ValidationException("No project $it") }
+    }
+
+    private fun renderInitiative(i: InitiativeRow, tasks: List<TaskRow>, links: Map<UUID, List<UUID>>): InitiativeResponse {
+        val projects = links.filterValues { i.id in it }.keys.toList()
+        val mine = tasks.filter { it.projectId in projects && it.status != TaskStatus.CANCELED }
+        return InitiativeResponse(i.id, i.name, i.description, i.status, i.targetDate, projects, mine.size, mine.count { it.status == TaskStatus.DONE })
     }
 
     // ---- labels ---------------------------------------------------------------------
@@ -281,9 +351,11 @@ class TaskService(
         )
     }
 
-    private fun renderProject(p: ProjectRow, tasks: List<TaskRow>): ProjectResponse {
+    private fun renderProject(p: ProjectRow, tasks: List<TaskRow>, links: Map<UUID, List<UUID>>): ProjectResponse {
         val mine = tasks.filter { it.projectId == p.id && it.status != TaskStatus.CANCELED }
-        return ProjectResponse(p.id, p.name, p.description, p.color, p.state, p.sourceType, mine.size, mine.count { it.status == TaskStatus.DONE })
+        return ProjectResponse(
+            p.id, p.name, p.description, p.color, p.state, p.sourceType, links[p.id].orEmpty(), mine.size, mine.count { it.status == TaskStatus.DONE },
+        )
     }
 
     fun isOverdue(t: TaskRow, now: Instant): Boolean {

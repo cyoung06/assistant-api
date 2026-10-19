@@ -151,6 +151,69 @@ class TaskRepository(private val db: DatabaseClient) {
         db.sql("delete from projects where id = :id").bind("id", id).fetch().awaitRowsUpdated()
     }
 
+    /** Each project's initiatives. */
+    suspend fun projectInitiatives(): Map<UUID, List<UUID>> =
+        db.sql("select project_id, initiative_id from project_initiatives").map { r -> r.req<UUID>("project_id") to r.req<UUID>("initiative_id") }
+            .flow().toList().groupBy({ it.first }, { it.second })
+
+    suspend fun setProjectInitiatives(projectId: UUID, initiativeIds: List<UUID>) {
+        db.sql("delete from project_initiatives where project_id = :p").bind("p", projectId).fetch().awaitRowsUpdated()
+        for (i in initiativeIds.distinct()) link(projectId, i)
+    }
+
+    suspend fun setInitiativeProjects(initiativeId: UUID, projectIds: List<UUID>) {
+        db.sql("delete from project_initiatives where initiative_id = :i").bind("i", initiativeId).fetch().awaitRowsUpdated()
+        for (p in projectIds.distinct()) link(p, initiativeId)
+    }
+
+    suspend fun link(projectId: UUID, initiativeId: UUID) {
+        db.sql("insert into project_initiatives (project_id, initiative_id) values (:p, :i) on conflict do nothing")
+            .bind("p", projectId).bind("i", initiativeId).fetch().awaitRowsUpdated()
+    }
+
+    // ---- initiatives ----------------------------------------------------------------
+
+    suspend fun initiatives(): List<InitiativeRow> =
+        db.sql("select * from initiatives order by lower(name)").map(::initiative).flow().toList()
+
+    suspend fun initiative(id: UUID): InitiativeRow? =
+        db.sql("select * from initiatives where id = :id").bind("id", id).map(::initiative).awaitOneOrNull()
+
+    suspend fun insertInitiative(i: InitiativeRow, now: Instant) {
+        db.sql(
+            """
+            insert into initiatives (id, name, description, status, target_date, created_at, updated_at)
+            values (:id, :name, :description, :status, :targetDate, :now, :now)
+            """,
+        ).bindInitiative(i).bind("now", now).fetch().awaitRowsUpdated()
+    }
+
+    suspend fun updateInitiative(i: InitiativeRow, now: Instant) {
+        db.sql(
+            """
+            update initiatives set name = :name, description = :description, status = :status, target_date = :targetDate, updated_at = :now
+            where id = :id
+            """,
+        ).bindInitiative(i).bind("now", now).fetch().awaitRowsUpdated()
+    }
+
+    /** Deletes the initiative; its projects stay. */
+    suspend fun deleteInitiative(id: UUID) {
+        db.sql("delete from initiatives where id = :id").bind("id", id).fetch().awaitRowsUpdated()
+    }
+
+    private fun DatabaseClient.GenericExecuteSpec.bindInitiative(i: InitiativeRow) =
+        bind("id", i.id).bind("name", i.name).bind("description", i.description).bind("status", i.status.wire)
+            .bindNullable("targetDate", i.targetDate, LocalDate::class.java)
+
+    private fun initiative(r: Readable) = InitiativeRow(
+        id = r.req("id"),
+        name = r.req("name"),
+        description = r.req("description"),
+        status = InitiativeStatus.of(r.req("status")),
+        targetDate = r.opt("target_date"),
+    )
+
     // ---- labels ---------------------------------------------------------------------
 
     suspend fun labels(): List<LabelRow> =

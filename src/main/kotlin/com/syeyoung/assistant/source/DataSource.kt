@@ -63,8 +63,11 @@ data class SourceRecord(
     val calendar: SourceTag? = null,
 )
 
-/** A label, project or calendar the source wants, identified by the source's own key (e.g. a course ID). */
-data class SourceTag(val key: String, val name: String)
+/**
+ * A label, project or calendar the source wants, identified by the source's own key (e.g. a course
+ * ID). For a project, [initiative] names the initiative it starts out in (e.g. its semester).
+ */
+data class SourceTag(val key: String, val name: String, val initiative: String? = null)
 
 data class SyncReport(
     val created: Int = 0,

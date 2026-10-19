@@ -80,6 +80,25 @@ class TaskController(private val service: TaskService) {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     suspend fun deleteProject(@PathVariable id: UUID) = service.deleteProject(id)
 
+    @GetMapping("/initiatives")
+    suspend fun initiatives(): List<InitiativeResponse> = service.initiatives()
+
+    @GetMapping("/initiatives/{id}")
+    suspend fun initiative(@PathVariable id: UUID): InitiativeResponse = service.initiative(id)
+
+    @PostMapping("/initiatives")
+    @ResponseStatus(HttpStatus.CREATED)
+    suspend fun createInitiative(@RequestBody req: CreateInitiativeRequest): InitiativeResponse = service.createInitiative(req)
+
+    /** Merge patch: name, description, status, targetDate (null clears it), projectIds (replaces them). */
+    @PatchMapping("/initiatives/{id}")
+    suspend fun updateInitiative(@PathVariable id: UUID, @RequestBody patch: JsonNode): InitiativeResponse = service.updateInitiative(id, patch)
+
+    /** Deletes the initiative; its projects stay. */
+    @DeleteMapping("/initiatives/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    suspend fun deleteInitiative(@PathVariable id: UUID) = service.deleteInitiative(id)
+
     @GetMapping("/labels")
     suspend fun labels(): List<LabelResponse> = service.labels()
 

@@ -37,6 +37,15 @@ enum class ProjectState(@get:JsonValue val wire: String) {
     }
 }
 
+/** Linear's initiative statuses. */
+enum class InitiativeStatus(@get:JsonValue val wire: String) {
+    PLANNED("planned"), ACTIVE("active"), COMPLETED("completed");
+
+    companion object {
+        fun of(wire: String) = entries.find { it.wire == wire } ?: throw ValidationException("Unknown initiative status '$wire'")
+    }
+}
+
 /** How relations are stored: [BLOCKS] and [DUPLICATE] have a direction, [RELATED] doesn't. */
 enum class RelationType(val wire: String) {
     BLOCKS("blocks"), RELATED("related"), DUPLICATE("duplicate");
@@ -91,6 +100,14 @@ data class ProjectRow(
 )
 
 data class LabelRow(val id: UUID, val name: String, val color: String)
+
+data class InitiativeRow(
+    val id: UUID,
+    val name: String,
+    val description: String,
+    val status: InitiativeStatus,
+    val targetDate: LocalDate?,
+)
 
 // ---- API shapes -------------------------------------------------------------------
 
@@ -150,6 +167,8 @@ data class ProjectResponse(
     val color: String,
     val state: ProjectState,
     val source: String?,
+    /** The initiatives it's part of. */
+    val initiativeIds: List<UUID>,
     /** Tasks in the project, canceled ones left out, and how many of them are done. */
     val taskCount: Int,
     val doneCount: Int,
@@ -160,6 +179,7 @@ data class CreateProjectRequest(
     val description: String = "",
     val color: String? = null,
     val state: ProjectState = ProjectState.IN_PROGRESS,
+    val initiativeIds: List<UUID> = emptyList(),
 )
 
 data class UpdateProjectRequest(
@@ -167,6 +187,28 @@ data class UpdateProjectRequest(
     val description: String? = null,
     val color: String? = null,
     val state: ProjectState? = null,
+    /** Replaces the project's initiatives when given. */
+    val initiativeIds: List<UUID>? = null,
+)
+
+data class InitiativeResponse(
+    val id: UUID,
+    val name: String,
+    val description: String,
+    val status: InitiativeStatus,
+    val targetDate: LocalDate?,
+    val projectIds: List<UUID>,
+    /** Over its projects' tasks, canceled ones left out: how many there are and how many are done. */
+    val taskCount: Int,
+    val doneCount: Int,
+)
+
+data class CreateInitiativeRequest(
+    val name: String,
+    val description: String = "",
+    val status: InitiativeStatus = InitiativeStatus.ACTIVE,
+    val targetDate: LocalDate? = null,
+    val projectIds: List<UUID> = emptyList(),
 )
 
 data class LabelResponse(val id: UUID, val name: String, val color: String)

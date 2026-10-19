@@ -65,7 +65,12 @@ class PlmsCatalog(
         val refs = mutableListOf<Ref>()
         val courses = plms.client.courses()
         // A project per course this semester; ended courses' projects are completed.
-        val tags = courses.map { SourceTag("course:${it.path("id").asLong()}", PlmsSource.courseName(it.path("fullname").asString(""))) }
+        val tags = courses.map {
+            SourceTag(
+                "course:${it.path("id").asLong()}", PlmsSource.courseName(it.path("fullname").asString("")),
+                it.path("startdate").asLong(0).takeIf { s -> s > 0 }?.let { s -> PlmsSource.semester(Instant.ofEpochSecond(s).atZone(props.zone).toLocalDate()) },
+            )
+        }
         projects.syncProjects(SourceType.PLMS, tags, Instant.now(clock))
         for (course in courses) {
             val id = course.path("id").asLong()

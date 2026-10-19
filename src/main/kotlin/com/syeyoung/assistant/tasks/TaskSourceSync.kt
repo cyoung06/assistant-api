@@ -99,6 +99,12 @@ class TaskSourceSync(
             if (existing == null && ref in known) continue
             val id = existing?.id ?: resolveProject(type, tag, now).also { created++ }
             sources.rememberRef(type, ref, id.toString())
+            // Put into its initiative once; after that the user decides where it belongs.
+            val linkRef = "${type.wire}:initiative:${tag.name}"
+            if (tag.initiative != null && linkRef !in known) {
+                repo.link(id, resolveInitiative(tag.initiative, now))
+                sources.rememberRef(type, linkRef, tag.initiative)
+            }
         }
         val listed = tags.map { it.name }.toSet()
         val active = setOf(ProjectState.BACKLOG, ProjectState.PLANNED, ProjectState.IN_PROGRESS)
@@ -127,6 +133,14 @@ class TaskSourceSync(
         val p = ProjectRow(UUID.randomUUID(), tag.name, "", leastUsed(all.map { it.color }), ProjectState.IN_PROGRESS, type.wire, tag.key)
         repo.insertProject(p, now)
         return p.id
+    }
+
+    /** The initiative named [name], made (active) when there's none. */
+    private suspend fun resolveInitiative(name: String, now: Instant): UUID {
+        repo.initiatives().find { it.name == name }?.let { return it.id }
+        val i = InitiativeRow(UUID.randomUUID(), name, "", InitiativeStatus.ACTIVE, null)
+        repo.insertInitiative(i, now)
+        return i.id
     }
 
     private suspend fun resolveLabel(name: String): UUID {
