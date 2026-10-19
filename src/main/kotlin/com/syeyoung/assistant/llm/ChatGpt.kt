@@ -331,18 +331,18 @@ class ChatGptAccount(
 class ChatGptController(private val account: ChatGptAccount) {
 
     @GetMapping("/account")
-    suspend fun status(): ChatGptStatus = account.status()
+    suspend fun chatgptAccount(): ChatGptStatus = account.status()
 
     /** Starts a sign-in: open the returned link, sign in, and send the address it ends on to /complete. */
     @PostMapping("/connect")
-    fun connect(): ChatGptConnect = account.connect()
+    fun chatgptConnect(): ChatGptConnect = account.connect()
 
     @PostMapping("/complete")
-    suspend fun complete(@RequestBody req: ChatGptComplete): ChatGptStatus = account.complete(req)
+    suspend fun chatgptComplete(@RequestBody req: ChatGptComplete): ChatGptStatus = account.complete(req)
 
     @DeleteMapping("/account")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun disconnect() {
+    suspend fun chatgptDisconnect() {
         account.disconnect()
     }
 }

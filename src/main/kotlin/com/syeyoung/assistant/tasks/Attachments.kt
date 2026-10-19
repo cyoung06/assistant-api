@@ -114,7 +114,7 @@ class AttachmentController(private val repo: AttachmentRepository, private val c
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun delete(@PathVariable id: UUID) = repo.delete(id)
+    suspend fun deleteAttachment(@PathVariable id: UUID) = repo.delete(id)
 
     private companion object {
         const val MAX_BYTES = 15 * 1024 * 1024

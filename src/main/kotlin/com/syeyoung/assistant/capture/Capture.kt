@@ -337,5 +337,5 @@ class CaptureController(private val service: CaptureService) {
 
     /** Proposes tasks and events from text and uploaded images; creates nothing. */
     @PostMapping("/analyze")
-    suspend fun analyze(@RequestBody req: AnalyzeRequest): AnalyzeResponse = service.analyze(req)
+    suspend fun analyzeCapture(@RequestBody req: AnalyzeRequest): AnalyzeResponse = service.analyze(req)
 }

@@ -1214,7 +1214,7 @@
     },
     "/api/v1/attachments/{id}" : {
       "delete" : {
-        "operationId" : "delete_2",
+        "operationId" : "deleteAttachment",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -1318,7 +1318,7 @@
     },
     "/api/v1/capture/analyze" : {
       "post" : {
-        "operationId" : "analyze_1",
+        "operationId" : "analyzeCapture",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1346,7 +1346,7 @@
     },
     "/api/v1/chatgpt/account" : {
       "delete" : {
-        "operationId" : "disconnect_1",
+        "operationId" : "chatgptDisconnect",
         "responses" : {
           "204" : {
             "content" : { },
@@ -1356,7 +1356,7 @@
         "tags" : [ "chat-gpt-controller" ]
       },
       "get" : {
-        "operationId" : "status",
+        "operationId" : "chatgptAccount",
         "responses" : {
           "200" : {
             "content" : {
@@ -1374,7 +1374,7 @@
     },
     "/api/v1/chatgpt/complete" : {
       "post" : {
-        "operationId" : "complete",
+        "operationId" : "chatgptComplete",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1402,7 +1402,7 @@
     },
     "/api/v1/chatgpt/connect" : {
       "post" : {
-        "operationId" : "connect_1",
+        "operationId" : "chatgptConnect",
         "responses" : {
           "200" : {
             "content" : {
@@ -1456,7 +1456,7 @@
         "tags" : [ "calendar-controller" ]
       },
       "post" : {
-        "operationId" : "create_2",
+        "operationId" : "createEvent",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -1484,7 +1484,7 @@
     },
     "/api/v1/events/{id}" : {
       "delete" : {
-        "operationId" : "delete_1",
+        "operationId" : "deleteEvent",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -1502,7 +1502,7 @@
         "tags" : [ "calendar-controller" ]
       },
       "get" : {
-        "operationId" : "event_1",
+        "operationId" : "getEvent",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -1526,7 +1526,7 @@
         "tags" : [ "calendar-controller" ]
       },
       "patch" : {
-        "operationId" : "update_1",
+        "operationId" : "updateEvent",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -1860,7 +1860,7 @@
     },
     "/api/v1/mail/account" : {
       "delete" : {
-        "operationId" : "disconnect",
+        "operationId" : "mailDisconnect",
         "responses" : {
           "204" : {
             "content" : { },
@@ -1870,7 +1870,7 @@
         "tags" : [ "mail-controller" ]
       },
       "get" : {
-        "operationId" : "account",
+        "operationId" : "mailAccount",
         "responses" : {
           "200" : {
             "content" : {
@@ -1888,7 +1888,7 @@
     },
     "/api/v1/mail/connect" : {
       "post" : {
-        "operationId" : "connect",
+        "operationId" : "mailConnect",
         "responses" : {
           "200" : {
             "content" : {
@@ -1906,7 +1906,7 @@
     },
     "/api/v1/mail/message" : {
       "get" : {
-        "operationId" : "message",
+        "operationId" : "mailMessage",
         "parameters" : [ {
           "in" : "query",
           "name" : "id",
@@ -2060,7 +2060,7 @@
     },
     "/api/v1/public-tokens" : {
       "get" : {
-        "operationId" : "list",
+        "operationId" : "listPublicTokens",
         "responses" : {
           "200" : {
             "content" : {
@@ -2079,7 +2079,7 @@
         "tags" : [ "public-token-controller" ]
       },
       "post" : {
-        "operationId" : "create_1",
+        "operationId" : "createPublicToken",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -2128,7 +2128,7 @@
     },
     "/api/v1/public/analyze" : {
       "post" : {
-        "operationId" : "analyze",
+        "operationId" : "publicAnalyze",
         "parameters" : [ {
           "in" : "header",
           "name" : "Authorization",
@@ -2164,7 +2164,7 @@
     },
     "/api/v1/public/events" : {
       "post" : {
-        "operationId" : "event",
+        "operationId" : "publicEvent",
         "parameters" : [ {
           "in" : "header",
           "name" : "Authorization",
@@ -2200,7 +2200,7 @@
     },
     "/api/v1/public/projects" : {
       "get" : {
-        "operationId" : "projects_1",
+        "operationId" : "publicProjects",
         "parameters" : [ {
           "in" : "header",
           "name" : "Authorization",
@@ -2229,7 +2229,7 @@
     },
     "/api/v1/public/tasks" : {
       "post" : {
-        "operationId" : "task",
+        "operationId" : "publicTask",
         "parameters" : [ {
           "in" : "header",
           "name" : "Authorization",
@@ -2381,7 +2381,7 @@
     },
     "/api/v1/sources" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "listSources",
         "responses" : {
           "200" : {
             "content" : {
@@ -2552,7 +2552,7 @@
         "tags" : [ "task-controller" ]
       },
       "get" : {
-        "operationId" : "task_1",
+        "operationId" : "task",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",

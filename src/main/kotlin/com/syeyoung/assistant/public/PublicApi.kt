@@ -123,12 +123,12 @@ class PublicTokens(private val db: DatabaseClient, private val clock: Clock) {
 @RequestMapping("/api/v1/public-tokens")
 class PublicTokenController(private val tokens: PublicTokens) {
     @GetMapping
-    suspend fun list(): List<TokenInfo> = tokens.list()
+    suspend fun listPublicTokens(): List<TokenInfo> = tokens.list()
 
     /** Creates a token; the token itself is shown only in this response. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    suspend fun create(@RequestBody req: CreateTokenRequest): NewToken = tokens.create(req.name)
+    suspend fun createPublicToken(@RequestBody req: CreateTokenRequest): NewToken = tokens.create(req.name)
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -165,14 +165,14 @@ class PublicController(
     private val props: AppProperties,
 ) {
     @GetMapping("/projects")
-    suspend fun projects(@RequestHeader("Authorization", required = false) auth: String?): List<PublicProject> {
+    suspend fun publicProjects(@RequestHeader("Authorization", required = false) auth: String?): List<PublicProject> {
         tokens.authorize(auth)
         return tasks.projects().filter { it.state.wire in setOf("backlog", "planned", "in_progress") }.map { PublicProject(it.id, it.name) }
     }
 
     @PostMapping("/tasks")
     @ResponseStatus(HttpStatus.CREATED)
-    suspend fun task(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: MailTaskRequest): Created {
+    suspend fun publicTask(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: MailTaskRequest): Created {
         tokens.authorize(auth)
         if (req.title.length > 500 || req.description.length > 20_000) throw ValidationException("Too long")
         val labels = tasks.labels()
@@ -184,7 +184,7 @@ class PublicController(
     }
 
     @PostMapping("/analyze")
-    suspend fun analyze(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: AnalyzeRequest): AnalyzeResponse {
+    suspend fun publicAnalyze(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: AnalyzeRequest): AnalyzeResponse {
         tokens.authorize(auth)
         if (req.text.length > 50_000) throw ValidationException("Too long")
         // Text only from outside; attachments stay a tailnet thing.
@@ -193,7 +193,7 @@ class PublicController(
 
     @PostMapping("/events")
     @ResponseStatus(HttpStatus.CREATED)
-    suspend fun event(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: CreateEventRequest): Created {
+    suspend fun publicEvent(@RequestHeader("Authorization", required = false) auth: String?, @RequestBody req: CreateEventRequest): Created {
         tokens.authorize(auth)
         if (req.repeat != null) throw ValidationException("Repeating events are made in the app")
         val e = calendar.create(req)

@@ -48,7 +48,7 @@ class SourceScheduler(private val sync: SourceSync, private val props: AppProper
 class SourceController(private val sync: SourceSync) {
 
     @GetMapping
-    suspend fun list(): List<SourceStatus> = sync.all().map { sync.status(it) }
+    suspend fun listSources(): List<SourceStatus> = sync.all().map { sync.status(it) }
 
     /** Syncs now and returns the resulting status. */
     @PostMapping("/{type}/sync")

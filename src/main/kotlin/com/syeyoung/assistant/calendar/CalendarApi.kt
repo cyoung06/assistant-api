@@ -263,16 +263,16 @@ class CalendarController(private val service: CalendarService) {
     ): List<EventOccurrence> = service.occurrences(from, to)
 
     @GetMapping("/events/{id}")
-    suspend fun event(@PathVariable id: String): EventResponse = service.event(id)
+    suspend fun getEvent(@PathVariable id: String): EventResponse = service.event(id)
 
     @PostMapping("/events")
     @ResponseStatus(HttpStatus.CREATED)
-    suspend fun create(@RequestBody req: CreateEventRequest): EventResponse = service.create(req)
+    suspend fun createEvent(@RequestBody req: CreateEventRequest): EventResponse = service.create(req)
 
     @PatchMapping("/events/{id}", consumes = ["application/json", "application/merge-patch+json"])
-    suspend fun update(@PathVariable id: String, @RequestBody patch: JsonNode): EventResponse = service.update(id, patch)
+    suspend fun updateEvent(@PathVariable id: String, @RequestBody patch: JsonNode): EventResponse = service.update(id, patch)
 
     @DeleteMapping("/events/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun delete(@PathVariable id: String) = service.delete(id)
+    suspend fun deleteEvent(@PathVariable id: String) = service.delete(id)
 }

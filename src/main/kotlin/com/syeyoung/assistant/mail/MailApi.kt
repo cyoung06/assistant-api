@@ -16,15 +16,15 @@ import org.springframework.web.bind.annotation.RestController
 class MailController(private val accounts: MailAccounts, private val mailbox: Mailbox) {
 
     @GetMapping("/account")
-    suspend fun account(): MailAccountStatus = accounts.status()
+    suspend fun mailAccount(): MailAccountStatus = accounts.status()
 
     /** Starts the Microsoft sign-in; the response has the code to enter at the verification URL. */
     @PostMapping("/connect")
-    suspend fun connect(): MailAccountStatus = accounts.connect()
+    suspend fun mailConnect(): MailAccountStatus = accounts.connect()
 
     /** One inbox message to read, by its Message-ID (without angle brackets). */
     @GetMapping("/message")
-    suspend fun message(@RequestParam id: String): MailMessage {
+    suspend fun mailMessage(@RequestParam id: String): MailMessage {
         val (email, token) = try {
             accounts.accessToken()
         } catch (e: MailNotConnected) {
@@ -35,5 +35,5 @@ class MailController(private val accounts: MailAccounts, private val mailbox: Ma
 
     @DeleteMapping("/account")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun disconnect() = accounts.disconnect()
+    suspend fun mailDisconnect() = accounts.disconnect()
 }
