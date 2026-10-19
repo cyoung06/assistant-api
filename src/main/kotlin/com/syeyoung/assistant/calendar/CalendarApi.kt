@@ -134,7 +134,7 @@ data class SkippedOccurrence(
 
 /**
  * What a project page shows of the calendar: its repeating events summed up rather than listed,
- * and the one-off events and skipped occurrences coming up.
+ * every one-off event still to come, and the skipped occurrences of the next few weeks.
  */
 data class ProjectSchedule(val recurring: List<RecurringSummary>, val upcoming: List<EventOccurrence>, val skipped: List<SkippedOccurrence>)
 
@@ -242,7 +242,7 @@ class CalendarService(
         ws.delete(e.href, e.etag)
     }
 
-    /** The project's events for a page: repeating ones summed up, then the next [days] days' one-off events and skipped dates. */
+    /** The project's events for a page: repeating ones summed up, every one-off event to come, and the next [days] days' skipped dates. */
     suspend fun projectSchedule(projectId: UUID, days: Long): ProjectSchedule {
         checkProject(projectId)
         val s = ws.snapshot()
@@ -264,7 +264,8 @@ class CalendarService(
             val time = e.start?.atZone(zone)?.toLocalTime()
             ws.fieldsOf(e, doc).exdates.filter { it in today..last }.forEach { skipped += SkippedOccurrence(e.uid, e.title, it, time) }
         }
-        val upcoming = occurrences(today, last).filter { it.projectId == projectId && !it.repeats }
+        // One-off events are few and each matters (an exam months ahead too), so all of them; a year is the furthest it reads.
+        val upcoming = occurrences(today, today.plusDays(365)).filter { it.projectId == projectId && !it.repeats }
         return ProjectSchedule(
             recurring.sortedWith(compareBy({ it.weekdays.firstOrNull() }, { it.start })),
             upcoming,
@@ -354,7 +355,7 @@ class CalendarController(private val service: CalendarService) {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     suspend fun deleteEvent(@PathVariable id: String) = service.delete(id)
 
-    /** The project's calendar: repeating events summed up, one-off events and skipped dates in the next [days] days. */
+    /** The project's calendar: repeating events summed up, every one-off event to come, skipped dates in the next [days] days. */
     @GetMapping("/projects/{id}/schedule")
     suspend fun projectSchedule(@PathVariable id: UUID, @RequestParam(defaultValue = "28") days: Long): ProjectSchedule = service.projectSchedule(id, days)
 }
