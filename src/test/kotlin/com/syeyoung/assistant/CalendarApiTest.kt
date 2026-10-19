@@ -110,7 +110,7 @@ class CalendarApiTest : ApiTestBase() {
             mapOf("eventId" to lecture["id"], "title" to "확률및통계", "freq" to "weekly", "interval" to 1, "weekdays" to listOf("TUESDAY", "THURSDAY"), "start" to "12:30:00", "end" to "13:45:00"),
         )
         assertThat((schedule["upcoming"] as List<*>).map { (it as Map<*, *>)["title"] }).containsExactly("Midterm")
-        assertThat(schedule["skipped"] as List<*>).singleElement().isEqualTo(mapOf("eventId" to lecture["id"], "title" to "확률및통계", "date" to "2026-10-29"))
+        assertThat(schedule["skipped"] as List<*>).singleElement().isEqualTo(mapOf("eventId" to lecture["id"], "title" to "확률및통계", "date" to "2026-10-29", "start" to "12:30:00"))
 
         // Occurrences carry the project; unlinking takes the event off the page.
         assertThat(events("2026-10-30", "2026-10-30").single()).containsEntry("projectId", course["id"])

@@ -986,6 +986,10 @@
           "eventId" : {
             "type" : "string"
           },
+          "start" : {
+            "format" : "time-local",
+            "type" : [ "string", "null" ]
+          },
           "title" : {
             "type" : "string"
           }

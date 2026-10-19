@@ -124,7 +124,13 @@ data class RecurringSummary(
 )
 
 /** A skipped occurrence of a project's repeating event (e.g. no class that day). */
-data class SkippedOccurrence(val eventId: String, val title: String, val date: LocalDate)
+data class SkippedOccurrence(
+    val eventId: String,
+    val title: String,
+    val date: LocalDate,
+    /** When it would have started; null for all-day events. */
+    val start: LocalTime? = null,
+)
 
 /**
  * What a project page shows of the calendar: its repeating events summed up rather than listed,
@@ -255,13 +261,14 @@ class CalendarService(
                 rule.weekdays.ifEmpty { if (rule.freq == Freq.WEEKLY) setOf(first.dayOfWeek) else emptySet() }.sorted(),
                 e.start?.atZone(zone)?.toLocalTime(), e.end?.atZone(zone)?.toLocalTime(),
             )
-            ws.fieldsOf(e, doc).exdates.filter { it in today..last }.forEach { skipped += SkippedOccurrence(e.uid, e.title, it) }
+            val time = e.start?.atZone(zone)?.toLocalTime()
+            ws.fieldsOf(e, doc).exdates.filter { it in today..last }.forEach { skipped += SkippedOccurrence(e.uid, e.title, it, time) }
         }
         val upcoming = occurrences(today, last).filter { it.projectId == projectId && !it.repeats }
         return ProjectSchedule(
             recurring.sortedWith(compareBy({ it.weekdays.firstOrNull() }, { it.start })),
             upcoming,
-            skipped.sortedBy { it.date },
+            skipped.sortedWith(compareBy({ it.date }, { it.start })),
         )
     }
 
