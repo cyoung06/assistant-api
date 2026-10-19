@@ -70,6 +70,54 @@
         "required" : [ "fixed", "id", "name" ],
         "type" : "object"
       },
+      "ChatGptComplete" : {
+        "properties" : {
+          "redirectUrl" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "redirectUrl" ],
+        "type" : "object"
+      },
+      "ChatGptConnect" : {
+        "properties" : {
+          "authorizeUrl" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "authorizeUrl" ],
+        "type" : "object"
+      },
+      "ChatGptStatus" : {
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "email" : {
+            "type" : [ "string", "null" ]
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          },
+          "model" : {
+            "type" : "string"
+          },
+          "plan" : {
+            "type" : [ "string", "null" ]
+          },
+          "quota" : {
+            "items" : {
+              "$ref" : "#/components/schemas/QuotaWindow"
+            },
+            "type" : "array"
+          },
+          "state" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "configured", "model", "state" ],
+        "type" : "object"
+      },
       "CreateEventRequest" : {
         "properties" : {
           "categories" : {
@@ -686,6 +734,23 @@
         "required" : [ "id", "name" ],
         "type" : "object"
       },
+      "QuotaWindow" : {
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "resetsAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "usedPercent" : {
+            "format" : "double",
+            "type" : "number"
+          }
+        },
+        "required" : [ "name", "usedPercent" ],
+        "type" : "object"
+      },
       "Ref" : {
         "properties" : {
           "context" : {
@@ -1190,6 +1255,80 @@
           }
         },
         "tags" : [ "capture-controller" ]
+      }
+    },
+    "/api/v1/chatgpt/account" : {
+      "delete" : {
+        "operationId" : "disconnect_1",
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "chat-gpt-controller" ]
+      },
+      "get" : {
+        "operationId" : "status",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChatGptStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "chat-gpt-controller" ]
+      }
+    },
+    "/api/v1/chatgpt/complete" : {
+      "post" : {
+        "operationId" : "complete",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ChatGptComplete"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChatGptStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "chat-gpt-controller" ]
+      }
+    },
+    "/api/v1/chatgpt/connect" : {
+      "post" : {
+        "operationId" : "connect_1",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChatGptConnect"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "chat-gpt-controller" ]
       }
     },
     "/api/v1/events" : {

@@ -1,6 +1,7 @@
 package com.syeyoung.assistant.mail
 
 import com.syeyoung.assistant.common.ConflictException
+import com.syeyoung.assistant.common.TokenCipher
 import com.syeyoung.assistant.common.opt
 import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
@@ -20,13 +21,8 @@ import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.awaitRowsUpdated
 import org.springframework.stereotype.Service
-import java.security.SecureRandom
 import java.time.Clock
 import java.time.Instant
-import java.util.Base64
-import javax.crypto.Cipher
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 data class MailAccountStatus(
     /** The app has a client ID and an encryption key, so an account can be connected. */
@@ -48,6 +44,7 @@ data class MailAccountStatus(
 class MailAccounts(
     private val db: DatabaseClient,
     private val oauth: MicrosoftOAuth,
+    private val cipher: TokenCipher,
     private val clock: Clock,
     props: AppProperties,
 ) {
@@ -62,7 +59,7 @@ class MailAccounts(
     @Volatile private var flowError: String? = null
     @Volatile private var cachedToken: Pair<String, Instant>? = null
 
-    val configured get() = config.clientId.isNotBlank() && key() != null
+    val configured get() = config.clientId.isNotBlank() && cipher.configured
 
     suspend fun status(): MailAccountStatus {
         if (!configured) return MailAccountStatus(false, "disconnected", error = "Mail isn't set up on the server (client ID and token key)")
@@ -109,7 +106,7 @@ class MailAccounts(
         val now = Instant.now(clock)
         cachedToken?.let { (token, until) -> if (now.isBefore(until)) return account.email to token }
         val tokens = try {
-            oauth.refresh(decrypt(account.refreshToken))
+            oauth.refresh(cipher.decrypt(account.refreshToken))
         } catch (e: OAuthException) {
             // invalid_grant and friends: the refresh token no longer works; only signing in again helps.
             if (e.error != "bad_response") markBroken(account.email, e.message ?: e.error)
@@ -166,7 +163,7 @@ class MailAccounts(
             insert into mail_accounts (email, refresh_token, connected_at) values (:email, :token, :now)
             on conflict (email) do update set refresh_token = :token, last_error = null
             """,
-        ).bind("email", email).bind("token", java.nio.ByteBuffer.wrap(encrypt(refreshToken))).bind("now", Instant.now(clock))
+        ).bind("email", email).bind("token", java.nio.ByteBuffer.wrap(cipher.encrypt(refreshToken))).bind("now", Instant.now(clock))
             .fetch().awaitRowsUpdated()
     }
 
@@ -174,23 +171,6 @@ class MailAccounts(
         cachedToken = null
         db.sql("update mail_accounts set last_error = :error where email = :email").bind("email", email).bind("error", error.take(500))
             .fetch().awaitRowsUpdated()
-    }
-
-    // ---- refresh token at rest: AES-256-GCM, a random nonce in front ----------------------
-
-    private fun key(): SecretKeySpec? = runCatching {
-        Base64.getDecoder().decode(config.tokenKey.trim()).takeIf { it.size == 32 }?.let { SecretKeySpec(it, "AES") }
-    }.getOrNull()
-
-    private fun encrypt(text: String): ByteArray {
-        val nonce = ByteArray(12).also { SecureRandom().nextBytes(it) }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, nonce)) }
-        return nonce + cipher.doFinal(text.toByteArray())
-    }
-
-    private fun decrypt(data: ByteArray): String {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, data, 0, 12)) }
-        return String(cipher.doFinal(data, 12, data.size - 12))
     }
 
     /** For tests: the next [accessToken] call goes to Microsoft. */

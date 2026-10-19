@@ -15,7 +15,8 @@ import org.springframework.web.reactive.function.BodyInserters
 
 /** Stands in for the model: tests set what it "reads". */
 class FakeCaptureModel : CaptureModel {
-    override var configured = true
+    var configured = true
+    override suspend fun available() = configured
     var next = LlmCapture()
     var lastInstructions = ""
     var lastImages = emptyList<CaptureImage>()

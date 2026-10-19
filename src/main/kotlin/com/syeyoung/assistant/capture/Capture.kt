@@ -5,20 +5,26 @@ import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
-import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
-import ai.koog.prompt.executor.model.executeStructured
-import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.executor.clients.openai.OpenAIResponsesParams
 import ai.koog.prompt.message.AttachmentContent
 import ai.koog.prompt.message.AttachmentSource
+import ai.koog.prompt.params.LLMParams
+import ai.koog.prompt.streaming.collectText
 import com.syeyoung.assistant.common.ConflictException
 import com.syeyoung.assistant.common.ValidationException
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.llm.ChatGptAccount
+import com.syeyoung.assistant.llm.ChatGptNotConnected
 import com.syeyoung.assistant.tasks.AttachmentRepository
 import com.syeyoung.assistant.tasks.DueDto
 import com.syeyoung.assistant.tasks.Priority
 import com.syeyoung.assistant.tasks.TaskRepository
+import kotlinx.coroutines.reactor.mono
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
@@ -26,7 +32,10 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.reactive.function.client.ClientRequest
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction
 import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Mono
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -65,31 +74,56 @@ data class LlmItem(
 
 /** An image (or more) and text to read. An interface so tests can stand in for the model. */
 interface CaptureModel {
-    val configured: Boolean
+    /** Whether it can be used now (signed in). */
+    suspend fun available(): Boolean
     suspend fun read(instructions: String, text: String, images: List<CaptureImage>): LlmCapture
 }
 
 class CaptureImage(val bytes: ByteArray, val mimeType: String, val fileName: String)
 
+/**
+ * The model through the ChatGPT sign-in: Koog's OpenAI client on the Responses API at the Codex
+ * backend, which only streams and doesn't keep responses (store=false). Each request gets a fresh
+ * access token and the account header from [ChatGptAccount]; the quota it reports is kept there.
+ */
 @Component
-class KoogCaptureModel(webClient: WebClient.Builder, private val props: AppProperties) : CaptureModel {
+class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGptAccount, private val props: AppProperties) : CaptureModel {
     // The model ID comes from config; capabilities (vision included) from Koog's closest known model.
     private val model = OpenAIModels.Chat.GPT5_6Luna.copy(id = props.llm.model)
 
-    private val executor by lazy {
-        val client = OpenAILLMClient(
-            apiKey = props.llm.apiKey,
-            settings = OpenAIClientSettings(baseUrl = props.llm.baseUrl),
-            httpClientFactory = SpringWebClientKoogHttpClient.Factory(webClient.clone()),
+    private val client by lazy {
+        val signedIn = ExchangeFilterFunction.ofRequestProcessor { req ->
+            mono {
+                val c = account.credentials()
+                ClientRequest.from(req).headers { h ->
+                    h.setBearerAuth(c.accessToken)
+                    h.set("ChatGPT-Account-Id", c.accountId)
+                }.build()
+            }
+        }
+        val quota = ExchangeFilterFunction.ofResponseProcessor { res ->
+            account.recordQuota(res.headers().asHttpHeaders())
+            if (res.statusCode().value() == 401) account.forgetAccessToken()
+            Mono.just(res)
+        }
+        OpenAILLMClient(
+            // Replaced on each request by the filter above.
+            apiKey = "chatgpt",
+            settings = OpenAIClientSettings(baseUrl = props.llm.baseUrl, responsesAPIPath = "responses"),
+            httpClientFactory = SpringWebClientKoogHttpClient.Factory(webClient.clone().filter(signedIn).filter(quota)),
         )
-        MultiLLMPromptExecutor(mapOf(LLMProvider.OpenAI to client))
     }
 
-    override val configured get() = props.llm.apiKey.isNotBlank()
+    override suspend fun available() = account.connected()
 
     override suspend fun read(instructions: String, text: String, images: List<CaptureImage>): LlmCapture = withTimeout(props.llm.timeout.toMillis()) {
-        val request = prompt("capture") {
-            system(instructions)
+        // The Codex backend takes the system prompt as "instructions" (not a developer message).
+        val params = OpenAIResponsesParams(
+            schema = LLMParams.Schema.JSON.Standard("capture", SCHEMA),
+            store = false,
+            additionalProperties = mapOf("instructions" to JsonPrimitive(instructions)),
+        )
+        val request = prompt("capture", params) {
             user {
                 text(text.ifBlank { "Read the attached image(s)." })
                 for (i in images) {
@@ -97,7 +131,43 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val props: AppPrope
                 }
             }
         }
-        executor.executeStructured<LlmCapture>(request, model).getOrThrow().data
+        val reply = client.executeStreaming(request, model, emptyList()).collectText()
+        json.decodeFromString<LlmCapture>(reply)
+    }
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    companion object {
+        /** [LlmCapture] as a strict JSON schema: every field listed, the optional ones nullable. */
+        val SCHEMA = Json.parseToJsonElement(
+            """
+            {
+              "type": "object", "additionalProperties": false, "required": ["items"],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["kind", "title", "description", "dueDate", "dueTime", "start", "end", "allDayDate", "project", "labels", "priority"],
+                    "properties": {
+                      "kind": { "type": "string", "enum": ["task", "event"] },
+                      "title": { "type": "string" },
+                      "description": { "type": "string" },
+                      "dueDate": { "type": ["string", "null"], "description": "YYYY-MM-DD" },
+                      "dueTime": { "type": ["string", "null"], "description": "HH:MM, 24h" },
+                      "start": { "type": ["string", "null"], "description": "YYYY-MM-DDTHH:MM" },
+                      "end": { "type": ["string", "null"], "description": "YYYY-MM-DDTHH:MM" },
+                      "allDayDate": { "type": ["string", "null"], "description": "YYYY-MM-DD" },
+                      "project": { "type": ["string", "null"] },
+                      "labels": { "type": "array", "items": { "type": "string" } },
+                      "priority": { "type": ["string", "null"], "enum": ["urgent", "high", "medium", "low", null] }
+                    }
+                  }
+                }
+              }
+            }
+            """,
+        ).jsonObject
     }
 }
 
@@ -138,7 +208,7 @@ class CaptureService(
 
     /** Reads shared text and screenshots and proposes tasks and events. Runs only when asked. */
     suspend fun analyze(req: AnalyzeRequest): AnalyzeResponse {
-        if (!model.configured) throw ConflictException("not_configured", "The model isn't set up on the server (LLM_API_KEY)")
+        if (!model.available()) throw ConflictException("not_connected", "Connect ChatGPT in Sources to analyze")
         if (req.text.isBlank() && req.attachmentIds.isEmpty()) throw ValidationException("Nothing to analyze")
         val images = req.attachmentIds.map { id ->
             val a = attachments.get(id) ?: throw ValidationException("No attachment $id")
@@ -166,6 +236,8 @@ class CaptureService(
             model.read(instructions, req.text, images)
         } catch (e: ValidationException) {
             throw e
+        } catch (e: ChatGptNotConnected) {
+            throw ConflictException("not_connected", e.message ?: "Connect ChatGPT in Sources")
         } catch (e: Exception) {
             log.warn("Capture failed: {}", e.toString())
             throw ConflictException("model_failed", "The model couldn't read this: ${e.message ?: e.javaClass.simpleName}")

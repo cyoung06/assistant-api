@@ -73,10 +73,14 @@ data class AppProperties(
         )
     }
 
-    /** The model that reads shared screenshots and text on request (capture); off without a key. */
+    /**
+     * The model that reads shared screenshots and text on request (capture), used through a ChatGPT
+     * sign-in (Codex's OAuth client), so it runs on the account's Codex quota rather than an API key.
+     */
     data class Llm(
-        val baseUrl: String = "https://api.openai.com",
-        val apiKey: String = "",
+        val issuer: String = "https://auth.openai.com",
+        val clientId: String = "app_EMoamEEZ73f0CkXaXp7hrann",
+        val baseUrl: String = "https://chatgpt.com/backend-api/codex",
         val model: String = "gpt-6-luna",
         val timeout: Duration = Duration.ofSeconds(90),
     )

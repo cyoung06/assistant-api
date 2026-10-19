@@ -80,6 +80,8 @@ abstract class ApiTestBase {
             registry.add("app.sources.mail.imap-host") { "127.0.0.1" }
             registry.add("app.sources.mail.imap-port") { TestMail.greenMail.imap.port }
             registry.add("app.sources.mail.imap-ssl") { "false" }
+            registry.add("app.llm.issuer") { TestOpenAI.url }
+            registry.add("app.llm.base-url") { TestOpenAI.url + "/backend-api/codex" }
             registry.add("app.sources.mail.token-key") { "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" }
         }
     }
@@ -87,7 +89,7 @@ abstract class ApiTestBase {
     @BeforeEach
     fun setUp() {
         runBlocking {
-            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations, mail_accounts, ref_index, attachments, public_tokens").await()
+            db.sql("truncate sources, source_refs, source_calendars, feed_tokens, tasks, projects, labels, task_labels, task_relations, mail_accounts, chatgpt_accounts, ref_index, attachments, public_tokens").await()
             db.sql("alter sequence task_number restart").await()
             // Every test starts with an empty CalDAV home.
             dav.collections().forEach { dav.deleteCollection(it.href) }
