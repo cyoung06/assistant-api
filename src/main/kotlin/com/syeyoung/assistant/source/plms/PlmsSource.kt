@@ -9,17 +9,20 @@ import com.syeyoung.assistant.source.SourceTag
 import org.springframework.stereotype.Component
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import kotlinx.coroutines.flow.toList
+import org.springframework.r2dbc.core.flow
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 
 /**
  * PLMS (POSTECH's Moodle): every assignment, quiz and other deadline on your PLMS to-do list
- * becomes a task due at the PLMS deadline, in its course's project and labeled by type. Once
+ * becomes a task due at the PLMS deadline, in its course's project and labeled by type; an
+ * assignment's task carries its instructions and attached files. Once
  * something is submitted it leaves the to-do list, and the task is marked done.
  */
 @Component
-class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataSource {
+class PlmsSource(private val props: AppProperties, private val mapper: ObjectMapper, private val db: org.springframework.r2dbc.core.DatabaseClient) : DataSource {
     private val config = props.sources.plms
     private val zone = props.zone
 
@@ -33,8 +36,37 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
     override suspend fun fetch(now: Instant): SourceSnapshot {
         val from = now.minus(config.lookback)
         val events = client.actionEvents(from, now.plus(config.lookahead))
+        val details = runCatching { assignmentNotes(events) }.getOrDefault(emptyMap())
         // Deadlines in the window that are no longer listed were submitted (or removed): done.
-        return SourceSnapshot(events.map { toRecord(it, zone) }, completeMissingDueFrom = from)
+        return SourceSnapshot(events.map { e -> toRecord(e, zone, details[e.path("instance").asLong(0)].takeIf { e.path("modulename").asString("") == "assign" }) }, completeMissingDueFrom = from)
+    }
+
+    /**
+     * Each assignment's description, for its task: the instructions as text, then its attached
+     * files, linked to their copies in the course's folder (shown in the app, once copied there), else to PLMS.
+     */
+    private suspend fun assignmentNotes(events: List<JsonNode>): Map<Long, String> {
+        val courses = events.filter { it.path("modulename").asString("") == "assign" }.map { it.path("course").path("id").asLong() }.filter { it > 0 }.distinct()
+        if (courses.isEmpty()) return emptyMap()
+        val copies = db.sql("select key, path from plms_files where key like 'assign/%'").map { r -> r.get("key", String::class.java)!! to r.get("path", String::class.java)!! }
+            .flow().toList().toMap()
+        val base = props.publicUrl.trimEnd('/')
+        val notes = mutableMapOf<Long, String>()
+        for (course in courses) {
+            for (a in runCatching { client.assignments(course) }.getOrNull() ?: continue) {
+                val text = htmlToMarkdown(a.path("intro").asString(""))
+                val files: List<String> = a.path("introattachments").toList().map { f ->
+                    val name = f.path("filename").asString("file")
+                    val key = "assign/${a.path("cmid").asLong()}/${f.path("filepath").asString("/")}$name"
+                    val link = copies[key]?.let { path -> "$base/files/" + path.removePrefix("Projects/").split('/').joinToString("/") { java.net.URLEncoder.encode(it, Charsets.UTF_8).replace("+", "%20") } }
+                        ?: f.path("fileurl").asString("").replace("/webservice/pluginfile.php/", "/pluginfile.php/")
+                    "- [${name.replace("[", "\\[").replace("]", "\\]")}]($link)"
+                }
+                val body = listOfNotNull(text.ifBlank { null }, files.takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "Files:\n")).joinToString("\n\n")
+                if (body.isNotBlank()) notes[a.path("id").asLong()] = body
+            }
+        }
+        return notes
     }
 
     companion object {
@@ -57,7 +89,22 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
         /** "HW6 is due" → "HW6". */
         fun cleanTitle(name: String): String = name.replace(TITLE_SUFFIX, "").trim().ifEmpty { name.trim() }
 
-        fun toRecord(event: JsonNode, zone: ZoneId): SourceRecord {
+        /** Moodle's HTML (an assignment's instructions) as Markdown-ish text: paragraphs, line breaks, lists and links kept. */
+        fun htmlToMarkdown(html: String): String {
+            var t = html.replace(Regex("""\s*\n\s*"""), " ")
+            t = t.replace(Regex("""<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)) { m ->
+                val label = m.groupValues[2].replace(Regex("<[^>]+>"), "").trim()
+                if (label.isBlank()) m.groupValues[1] else "[$label](${m.groupValues[1]})"
+            }
+            t = t.replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+                .replace(Regex("""<li[^>]*>""", RegexOption.IGNORE_CASE), "\n- ")
+                .replace(Regex("""</(p|div|h\d|ul|ol|table|tr)>""", RegexOption.IGNORE_CASE), "\n\n")
+                .replace(Regex("<[^>]+>"), "")
+                .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
+            return t.lines().joinToString("\n") { it.trim() }.replace(Regex("""\n{3,}"""), "\n\n").trim()
+        }
+
+        fun toRecord(event: JsonNode, zone: ZoneId, notes: String? = null): SourceRecord {
             val module = event.path("modulename").asString("")
             val instance = event.path("instance").asLong(0)
             val due = Instant.ofEpochSecond(event.path("timesort").asLong()).atZone(zone)
@@ -74,6 +121,7 @@ class PlmsSource(props: AppProperties, private val mapper: ObjectMapper) : DataS
                     ?: event.path("action").path("url").asString(null),
                 tags = listOfNotNull(MODULE_TAGS[module]?.let { SourceTag("module:$module", it) }),
                 project = project,
+                notes = notes,
             )
         }
 

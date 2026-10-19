@@ -33,7 +33,7 @@ data class DriveFolder(val path: String, val entries: List<DriveEntry>)
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveController(private val drive: DriveService, private val dav: WebDav, private val props: AppProperties) {
+class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties) {
 
     @GetMapping
     fun driveInfo() = DriveInfo(drive.enabled, props.drive.publicUrl, props.drive.username)
@@ -62,8 +62,23 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         val type = r.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_OCTET_STREAM_VALUE)
         val body = DataBufferUtils.readInputStream({ r.body() }, DefaultDataBufferFactory.sharedInstance, 64 * 1024)
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(type))
-            .apply { r.headers().firstValueAsLong("Content-Length").ifPresent { contentLength(it) } }
+            .header("X-Content-Type-Options", "nosniff")
+            .apply {
+                // Files are served from the app's own address: pages among them (HTML, SVG) run nothing there.
+                // (PDFs and media are left as they are, for the browser's viewers.)
+                if (!Regex("^(application/pdf|image/(?!svg)|video/|audio/)").containsMatchIn(type)) header("Content-Security-Policy", "sandbox")
+                r.headers().firstValueAsLong("Content-Length").ifPresent { contentLength(it) } }
             .body(body)
+    }
+
+    /** A preview of a PDF (its first page as a JPEG, [width] pixels wide); [version] (its modified time) keys caching. */
+    @GetMapping("/thumb", produces = [MediaType.IMAGE_JPEG_VALUE])
+    suspend fun thumb(@RequestParam path: String, @RequestParam(defaultValue = "") version: String, @RequestParam(defaultValue = "240") width: Int): ResponseEntity<ByteArray> {
+        requireEnabled()
+        val p = safe(path)
+        if (!p.lowercase().endsWith(".pdf")) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "only PDFs have previews")
+        val jpeg = thumbs.pdf(p, version, width.coerceIn(64, 640)) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).header("Cache-Control", "private, max-age=604800").body(jpeg)
     }
 
     /** Writes a file (making its folder); the request body is the contents. */

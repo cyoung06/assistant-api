@@ -79,16 +79,23 @@ class PlmsClient(
         ?: throw PlmsException("PLMS pages carry no web service token")).also { wsToken = it }
 
     /** A course's sections and their activities, files included (core_course_get_contents). */
-    suspend fun courseContents(courseId: Long): JsonNode {
+    suspend fun courseContents(courseId: Long): JsonNode = rest("core_course_get_contents", "courseid" to courseId.toString())
+
+    /** A course's assignments, with the files attached to them (mod_assign_get_assignments). */
+    suspend fun assignments(courseId: Long): JsonNode =
+        rest("mod_assign_get_assignments", "courseids[0]" to courseId.toString()).path("courses").firstOrNull()?.path("assignments") ?: mapper.createArrayNode()
+
+    /** A Moodle REST web service call with the token PLMS's pages carry. */
+    private suspend fun rest(function: String, vararg args: Pair<String, String>): JsonNode {
         repeat(2) {
-            val q = formEncode("wstoken" to wsToken(), "wsfunction" to "core_course_get_contents", "moodlewsrestformat" to "json", "courseid" to courseId.toString())
+            val q = formEncode("wstoken" to wsToken(), "wsfunction" to function, "moodlewsrestformat" to "json", *args)
             val root = mapper.readTree(send(HttpRequest.newBuilder(URI("$baseUrl/webservice/rest/server.php?$q")).GET()).body())
             if (!root.isObject || !root.has("exception")) return root
             // A stale token (a new session issues a new one): get a fresh one once.
             wsToken = null
             sesskey = null
         }
-        throw PlmsException("PLMS course contents for $courseId: web service refused")
+        throw PlmsException("PLMS $function: web service refused")
     }
 
     /** A course file's contents, from the download link course contents give. */

@@ -26,8 +26,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * Course files from PLMS, copied into each course's project folder in the drive: Course files/,
- * one folder per section of the course (as PLMS lists them). A file is copied once; if PLMS later
+ * Course files from PLMS (activities' files and assignments' attachments), copied into each course's
+ * project folder in the drive, all in Course files/. A file is copied once; if PLMS later
  * has a newer version, it's copied again beside the old one ("name (updated 2026-10-21).pdf"), so a
  * copy that was written on is never replaced.
  */
@@ -67,17 +67,33 @@ class PlmsFiles(
         val linked = sources.refs(SourceType.PLMS)
         fun projectOf(id: Long, name: String) = all.find { it.sourceType == SourceType.PLMS.wire && it.sourceKey == "course:$id" }
             ?: linked["${SourceType.PLMS.wire}:project:$name"]?.let { uid -> all.find { it.id.toString() == uid } }
-        val known = db.sql("select key, modified from plms_files").map { r -> r.get("key", String::class.java)!! to r.get("modified", java.lang.Long::class.java)!!.toLong() }
+        class Copied(val path: String, val modified: Long)
+        val known = db.sql("select key, path, modified from plms_files")
+            .map { r -> r.get("key", String::class.java)!! to Copied(r.get("path", String::class.java)!!, r.get("modified", java.lang.Long::class.java)!!.toLong()) }
             .flow().toList().toMap()
         var copied = 0
         for ((course, courseName) in courses) {
             val project = projectOf(course, courseName) ?: continue
             val folder = drive.folderOf(project.id) + "Course files/"
-            for (file in files(plms.client.courseContents(course))) {
+            val all = files(plms.client.courseContents(course), folder) + runCatching { assignmentFiles(plms.client.assignments(course)) }.getOrDefault(emptyList())
+            val taken = (dav.list(folder)?.map { it.path }.orEmpty()).toMutableSet()
+            for (file in all) {
                 val previous = known[file.key]
-                if (previous != null && previous >= file.modified) continue
+                if (previous != null && previous.modified >= file.modified) {
+                    // Copied earlier into a week's folder: brought up into Course files (keeping its name).
+                    val flat = folder + file.subfolder + previous.path.substringAfterLast('/')
+                    if (previous.path != flat && previous.path.startsWith(folder)) runCatching {
+                        val to = free(flat, taken)
+                        dav.makeFolders(to.substringBeforeLast('/'))
+                        dav.move(previous.path, to)
+                        taken += to
+                        record(file, to)
+                        log.info("PLMS file moved: {} → {}", previous.path, to)
+                    }
+                    continue
+                }
                 val name = if (previous == null) file.name else updatedName(file.name, Instant.ofEpochSecond(file.modified))
-                val path = folder + file.subfolder + name
+                val path = free(folder + file.subfolder + name, taken).also { taken += it }
                 try {
                     dav.makeFolders(path.substringBeforeLast('/'))
                     plms.client.download(file.url).let { r -> r.body().use { dav.put(path, it, file.size.takeIf { s -> s > 0 }, file.mime) } }
@@ -90,17 +106,48 @@ class PlmsFiles(
                     log.warn("PLMS file {} not copied: {}", path, e.toString())
                 }
             }
+            // Week folders left empty by the move go.
+            dav.list(folder)?.filter { it.folder }?.forEach { f -> if (dav.list(f.path)?.isEmpty() == true && f.path in sectionFolders) dav.delete(f.path) }
         }
         copied
     }
 
+    /** [path], or "name (2).ext" and so on if something (another file of the same name) is there. */
+    private fun free(path: String, taken: Set<String>): String {
+        if (path !in taken) return path
+        val dot = path.lastIndexOf('.').takeIf { it > path.lastIndexOf('/') } ?: path.length
+        var n = 2
+        while (true) { val p = path.substring(0, dot) + " ($n)" + path.substring(dot); if (p !in taken) return p; n++ }
+    }
+
+    /** The files attached to the course's assignments (handouts, starter code), in Course files too. */
+    private fun assignmentFiles(assignments: JsonNode): List<CourseFile> = assignments.flatMap { a ->
+        a.path("introattachments").filter { it.path("fileurl").asString("").isNotBlank() }.map { f ->
+            CourseFile(
+                key = "assign/${a.path("cmid").asLong()}/${f.path("filepath").asString("/")}${f.path("filename").asString("")}",
+                url = f.path("fileurl").asString(""),
+                name = DriveService.safeName(f.path("filename").asString("file")),
+                subfolder = "",
+                size = f.path("filesize").asLong(0),
+                modified = f.path("timemodified").asLong(0),
+                mime = f.path("mimetype").asString(null),
+            )
+        }
+    }
+
     private class CourseFile(val key: String, val url: String, val name: String, val subfolder: String, val size: Long, val modified: Long, val mime: String?)
 
-    /** The course's files: each file of its file, resource and folder activities, with the section it's in. */
-    private fun files(contents: JsonNode): List<CourseFile> = contents.flatMap { section ->
+    /** Folders named after the course's sections (where files used to go), to remove once empty. */
+    private val sectionFolders = mutableSetOf<String>()
+
+    /**
+     * The course's files: each file of its file, resource and folder activities, all straight in
+     * Course files/ (a folder activity's files in a folder named after it).
+     */
+    private fun files(contents: JsonNode, folder: String = ""): List<CourseFile> = contents.flatMap { section ->
         val sectionName = DriveService.safeName(section.path("name").asString(""))
-        // The course's general section (number 0) goes straight into Course files/.
-        val sub = if (section.path("section").asInt(0) == 0 || sectionName.isBlank()) "" else "$sectionName/"
+        if (sectionName.isNotBlank()) sectionFolders += "$folder$sectionName/"
+        val sub = ""
         section.path("modules").flatMap { module ->
             module.path("contents").filter { it.path("type").asString("") == "file" && it.path("fileurl").asString("").isNotBlank() }.map { f ->
                 val inFolder = f.path("filepath").asString("/").trim('/').split('/').filter { it.isNotBlank() }.joinToString("") { DriveService.safeName(it) + "/" }

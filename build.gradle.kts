@@ -52,6 +52,9 @@ dependencies {
     // iCalendar recurrence expansion (any RRULE a calendar app may write).
     implementation("org.mnode.ical4j:ical4j:4.4.0")
 
+    // First-page previews of the drive's PDFs.
+    implementation("org.apache.pdfbox:pdfbox:3.0.5")
+
     // Compile scope for its jsonb type (io.r2dbc.postgresql.codec.Json).
     implementation("org.postgresql:r2dbc-postgresql")
     // Flyway runs migrations over JDBC.

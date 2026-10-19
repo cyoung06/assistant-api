@@ -1900,6 +1900,50 @@
         "tags" : [ "drive-controller" ]
       }
     },
+    "/api/v1/drive/thumb" : {
+      "get" : {
+        "operationId" : "thumb",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "version",
+          "required" : false,
+          "schema" : {
+            "default" : "",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "width",
+          "required" : false,
+          "schema" : {
+            "default" : 240,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "image/jpeg" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
     "/api/v1/events" : {
       "get" : {
         "operationId" : "occurrences",
