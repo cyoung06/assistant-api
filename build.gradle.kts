@@ -41,6 +41,11 @@ dependencies {
     implementation("ai.koog:http-client-spring-webclient:$koogVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json")
 
+    // MCP server (for ChatGPT through OpenAI's Secure MCP Tunnel): the official Java SDK, Spring's WebFlux transport.
+    implementation("io.modelcontextprotocol.sdk:mcp-core:2.0.0")
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson3:2.0.0")
+    implementation("org.springframework.ai:mcp-spring-webflux:2.0.1")
+
     // IMAP for the mail source (version from Spring Boot's dependency management).
     implementation("org.eclipse.angus:angus-mail")
 
