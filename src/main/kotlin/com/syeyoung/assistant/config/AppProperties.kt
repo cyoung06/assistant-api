@@ -46,6 +46,11 @@ data class AppProperties(
             val imapSsl: Boolean = true,
             val tokenKey: String = "",
             val interval: Duration = Duration.ofMinutes(5),
+            /** Every new mail in the watched folders goes to Triage (read-only: nothing is marked read). */
+            val triage: Boolean = true,
+            val triageInterval: Duration = Duration.ofMinutes(2),
+            /** On the very first look, mail this old is read too. */
+            val triageBacklog: Duration = Duration.ofDays(3),
         )
 
         data class Ical(

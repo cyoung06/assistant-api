@@ -21,9 +21,13 @@ class FakeCaptureModel : CaptureModel {
     var lastInstructions = ""
     var lastImages = emptyList<CaptureImage>()
     var failure: Exception? = null
-    override suspend fun read(instructions: String, text: String, images: List<CaptureImage>): LlmCapture {
+    var lastText = ""
+    var lastLight = false
+    override suspend fun read(instructions: String, text: String, images: List<CaptureImage>, light: Boolean): LlmCapture {
         lastInstructions = instructions
         lastImages = images
+        lastText = text
+        lastLight = light
         failure?.let { throw it }
         return next
     }

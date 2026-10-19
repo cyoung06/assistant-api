@@ -6,6 +6,8 @@ import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.clients.openai.OpenAIResponsesParams
+import ai.koog.prompt.executor.clients.openai.base.models.ReasoningEffort
+import ai.koog.prompt.executor.clients.openai.models.ReasoningConfig
 import ai.koog.prompt.message.AttachmentContent
 import ai.koog.prompt.message.AttachmentSource
 import ai.koog.prompt.params.LLMParams
@@ -55,7 +57,13 @@ import java.util.UUID
 
 /** Everything the model found. Dates and times are local (the user's zone) ISO strings. */
 @Serializable
-data class LlmCapture(val items: List<LlmItem> = emptyList())
+data class LlmCapture(
+    val items: List<LlmItem> = emptyList(),
+    /** For mail: act (needs something from me), maybe (unsure it applies), nothing. */
+    val verdict: String? = null,
+    /** Why, in a short sentence (shown with the verdict). */
+    val reason: String? = null,
+)
 
 /**
  * One thing to do or attend. kind "task": something to get done, with [dueDate] (YYYY-MM-DD) and
@@ -84,7 +92,8 @@ data class LlmItem(
 interface CaptureModel {
     /** Whether it can be used now (signed in). */
     suspend fun available(): Boolean
-    suspend fun read(instructions: String, text: String, images: List<CaptureImage>): LlmCapture
+    /** [light]: less reasoning, for plain extraction (mail). */
+    suspend fun read(instructions: String, text: String, images: List<CaptureImage>, light: Boolean = false): LlmCapture
 }
 
 class CaptureImage(val bytes: ByteArray, val mimeType: String, val fileName: String)
@@ -126,11 +135,12 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
 
     override suspend fun available() = account.connected()
 
-    override suspend fun read(instructions: String, text: String, images: List<CaptureImage>): LlmCapture = withTimeout(props.llm.timeout.toMillis()) {
+    override suspend fun read(instructions: String, text: String, images: List<CaptureImage>, light: Boolean): LlmCapture = withTimeout(props.llm.timeout.toMillis()) {
         // The Codex backend takes the system prompt as "instructions" (not a developer message).
         val params = OpenAIResponsesParams(
             schema = LLMParams.Schema.JSON.Standard("capture", SCHEMA),
             store = false,
+            reasoning = if (light) ReasoningConfig(effort = ReasoningEffort.LOW) else null,
             additionalProperties = mapOf("instructions" to JsonPrimitive(instructions)),
         )
         val request = prompt("capture", params) {
@@ -201,8 +211,10 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
         val SCHEMA = Json.parseToJsonElement(
             """
             {
-              "type": "object", "additionalProperties": false, "required": ["items"],
+              "type": "object", "additionalProperties": false, "required": ["verdict", "reason", "items"],
               "properties": {
+                "verdict": { "type": ["string", "null"], "enum": ["act", "maybe", "nothing", null] },
+                "reason": { "type": ["string", "null"] },
                 "items": {
                   "type": "array",
                   "items": {
@@ -255,7 +267,12 @@ data class Proposal(
     val sameAs: Long? = null,
 )
 
-data class AnalyzeResponse(val items: List<Proposal>)
+data class AnalyzeResponse(
+    val items: List<Proposal>,
+    /** When asked for one (mail): act, maybe or nothing, and why. */
+    val verdict: String? = null,
+    val reason: String? = null,
+)
 
 @Service
 class CaptureService(
@@ -272,7 +289,7 @@ class CaptureService(
      * Reads shared text and screenshots and proposes tasks and events. With [openTasks] (for
      * Triage) the model also sees the open tasks, so it can say which one a proposal repeats.
      */
-    suspend fun analyze(req: AnalyzeRequest, openTasks: Boolean = false): AnalyzeResponse {
+    suspend fun analyze(req: AnalyzeRequest, openTasks: Boolean = false, guidance: String? = null, light: Boolean = false): AnalyzeResponse {
         if (!model.available()) throw ConflictException("not_connected", "Connect ChatGPT in Sources to analyze")
         if (req.text.isBlank() && req.attachmentIds.isEmpty()) throw ValidationException("Nothing to analyze")
         val images = req.attachmentIds.map { id ->
@@ -296,9 +313,9 @@ class CaptureService(
             - project: one of these if it clearly fits, else null: ${projects.joinToString(", ") { "\"${it.name}\"" }.ifEmpty { "(none)" }}.
             - labels: any of these that fit: ${labels.joinToString(", ") { "\"${it.name}\"" }.ifEmpty { "(none)" }}.
             - priority: only if the source makes it clearly urgent or important.
-        """.trimIndent() + openTaskList(openTasks)
+        """.trimIndent() + openTaskList(openTasks) + guidance?.let { "\n\n$it" }.orEmpty()
         val result = try {
-            model.read(instructions, req.text, images)
+            model.read(instructions, req.text, images, light)
         } catch (e: ValidationException) {
             throw e
         } catch (e: ChatGptNotConnected) {
@@ -309,7 +326,7 @@ class CaptureService(
         }
         val projectByName = projects.associateBy { it.name.lowercase() }
         val labelByName = labels.associateBy { it.name.lowercase() }
-        return AnalyzeResponse(result.items.mapNotNull { item ->
+        return AnalyzeResponse(verdict = result.verdict, reason = result.reason?.trim()?.ifEmpty { null }, items = result.items.mapNotNull { item ->
             val title = item.title.trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
             val base = Proposal(
                 kind = "task", title = title, description = item.description.trim(),

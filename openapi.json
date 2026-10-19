@@ -23,6 +23,12 @@
               "$ref" : "#/components/schemas/Proposal"
             },
             "type" : "array"
+          },
+          "reason" : {
+            "type" : [ "string", "null" ]
+          },
+          "verdict" : {
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "items" ],
@@ -1267,6 +1273,12 @@
           "link" : {
             "type" : [ "string", "null" ]
           },
+          "reason" : {
+            "type" : [ "string", "null" ]
+          },
+          "sender" : {
+            "type" : [ "string", "null" ]
+          },
           "source" : {
             "type" : "string"
           },
@@ -1278,6 +1290,9 @@
           },
           "title" : {
             "type" : "string"
+          },
+          "verdict" : {
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "attachments", "createdAt", "id", "items", "source", "status", "text", "title" ],
@@ -1304,6 +1319,15 @@
           }
         },
         "required" : [ "id", "proposal", "status" ],
+        "type" : "object"
+      },
+      "TriageProfile" : {
+        "properties" : {
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "text" ],
         "type" : "object"
       },
       "UpdateCalendarRequest" : {
@@ -3109,6 +3133,50 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TriageItemResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      }
+    },
+    "/api/v1/triage/profile" : {
+      "get" : {
+        "operationId" : "triageProfile",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageProfile"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "triage-controller" ]
+      },
+      "put" : {
+        "operationId" : "setTriageProfile",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TriageProfile"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageProfile"
                 }
               }
             },

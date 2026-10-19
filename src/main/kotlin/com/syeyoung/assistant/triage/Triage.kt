@@ -43,6 +43,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -68,6 +69,9 @@ data class SubmitRequest(
     val link: String? = null,
 )
 
+/** What the model is told about the user, to judge which mail matters (edited in Triage). */
+data class TriageProfile(val text: String)
+
 data class TriageItemResponse(
     val id: UUID,
     val proposal: Proposal,
@@ -88,6 +92,11 @@ data class TriageInputResponse(
     /** pending (waiting for the model) · done · failed */
     val status: String,
     val error: String?,
+    /** Mail: who sent it. */
+    val sender: String?,
+    /** Mail: act (something for me), maybe (unsure it applies) or nothing, and why. */
+    val verdict: String?,
+    val reason: String?,
     val attachments: List<AttachmentInfo>,
     val items: List<TriageItemResponse>,
     val createdAt: Instant,
@@ -130,20 +139,99 @@ class TriageService(
     }
 
     /** Keeps an input for the model to read soon; returns at once. */
-    suspend fun submit(req: SubmitRequest): TriageInputResponse {
+    suspend fun submit(req: SubmitRequest): TriageInputResponse = input(insert(req, sender = null))
+
+    /** A mail, once: false when it was already taken in (by its mid: link). */
+    suspend fun submitMail(title: String, text: String, link: String, sender: String): Boolean {
+        val known = db.sql("select 1 from triage_inputs where source = 'mail' and link = :link").bind("link", link).map { _ -> 1 }.awaitOneOrNull()
+        if (known != null) return false
+        insert(SubmitRequest(source = "mail", text = text, title = title.ifBlank { "(no subject)" }, link = link), sender)
+        return true
+    }
+
+    private suspend fun insert(req: SubmitRequest, sender: String?): UUID {
         if (req.text.isBlank() && req.attachmentIds.isEmpty()) throw ValidationException("Nothing to triage")
         val id = UUID.randomUUID()
         val title = req.title.trim().ifEmpty {
             req.text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80)
                 ?: if (req.attachmentIds.size > 1) "${req.attachmentIds.size} screenshots" else "Screenshot"
         }
-        db.sql("insert into triage_inputs (id, source, text, title, link, created_at, retry_at) values (:id, :source, :text, :title, :link, :now, :now)")
+        db.sql("insert into triage_inputs (id, source, text, title, link, sender, created_at, retry_at) values (:id, :source, :text, :title, :link, :sender, :now, :now)")
             .bind("id", id).bind("source", req.source.take(20)).bind("text", req.text.take(TEXT_LIMIT)).bind("title", title)
             .let { s -> req.link?.let { s.bind("link", it) } ?: s.bindNull("link", String::class.java) }
+            .let { s -> sender?.let { s.bind("sender", it) } ?: s.bindNull("sender", String::class.java) }
             .bind("now", Instant.now(clock)).fetch().awaitRowsUpdated()
         attachments.holdForInput(id, req.attachmentIds)
         wake.trySend(Unit)
-        return input(id)
+        return id
+    }
+
+    // ---- what the model knows about the user --------------------------------------------
+
+    suspend fun profile(): TriageProfile =
+        TriageProfile(db.sql("select value from settings where key = 'triage.profile'").map { r -> r.req<String>("value") }.awaitOneOrNull() ?: DEFAULT_PROFILE)
+
+    suspend fun setProfile(p: TriageProfile): TriageProfile {
+        db.sql("insert into settings (key, value) values ('triage.profile', :v) on conflict (key) do update set value = :v")
+            .bind("v", p.text.take(8_000)).fetch().awaitRowsUpdated()
+        return profile()
+    }
+
+    /**
+     * How to judge a mail: the user's profile (with this semester's courses), the bar for
+     * suggesting anything, and how the user decided on similar mail before.
+     */
+    private suspend fun mailGuidance(input: InputRow): String {
+        val courses = db.sql(
+            """
+            select distinct p.name from projects p join project_initiatives pi on pi.project_id = p.id join initiatives i on i.id = pi.initiative_id
+            where i.status = 'active' and p.state in ('backlog', 'planned', 'in_progress') order by p.name
+            """,
+        ).map { r -> r.req<String>("name") }.flow().toList()
+        val examples = pastDecisions(input)
+        return buildString {
+            append("This is a mail. About me:\n").append(profile().text.trim()).append("\n")
+            if (courses.isNotEmpty()) append("My courses and projects this semester: ").append(courses.joinToString(", ")).append(".\n")
+            append(
+                """
+                |
+                |Decide whether this mail asks something of me or tells me something I must act on or attend:
+                |- verdict "act": a deadline or required action that applies to me (submit, register, pay, reply, bring, prepare),
+                |  an event I'm expected at (class change, exam, a meeting I'm invited to), or a change to something I already have
+                |  (a moved deadline: give sameAsTask). Return the tasks/events to make.
+                |- verdict "maybe": it might apply to me but the mail doesn't make it clear (audience, year, department). Return the items.
+                |- verdict "nothing": no items. Informative, from the school, or mentioning a date is not enough on its own.
+                |Check that it applies to me: its audience (학부/대학원, department, year, dorm building) and my courses.
+                |Bulk mail (I'm not in To/Cc) is usually nothing and personal mail usually something, but follow the content.
+                |reason: one short sentence why, in the mail's language.
+                """.trimMargin(),
+            )
+            if (examples.isNotEmpty()) append("\n\nHow I decided on earlier mail (follow my taste):\n").append(examples.joinToString("\n"))
+        }
+    }
+
+    /** Up to 20 earlier mail decisions, the same sender's first: "From …, "subject" → accepted: task "…"". */
+    private suspend fun pastDecisions(input: InputRow): List<String> {
+        val rows = db.sql(
+            """
+            select i.id, i.title, i.sender, i.verdict, i.reason from triage_inputs i
+            where i.source = 'mail' and i.status = 'done' and i.id <> :id
+              and (i.verdict = 'nothing' or not exists (select 1 from triage_items x where x.input_id = i.id and x.status = 'pending'))
+            order by (i.sender is not distinct from :sender) desc, i.analyzed_at desc limit 20
+            """,
+        ).bind("id", input.id).let { s -> input.sender?.let { s.bind("sender", it) } ?: s.bindNull("sender", String::class.java) }
+            .map { r -> listOf(r.req<UUID>("id").toString(), r.req<String>("title"), r.opt<String>("sender").orEmpty(), r.opt<String>("verdict").orEmpty(), r.opt<String>("reason").orEmpty()) }
+            .flow().toList()
+        return rows.map { (id, title, sender, verdict, reason) ->
+            val items = db.sql("select proposal, status from triage_items where input_id = :id order by position").bind("id", UUID.fromString(id))
+                .map { r -> mapper.readValue(r.req<Json>("proposal").asString(), Proposal::class.java) to r.req<String>("status") }.flow().toList()
+            val outcome = when {
+                verdict == "nothing" || items.isEmpty() -> "nothing" + reason.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                items.any { it.second == "accepted" } -> "accepted: " + items.filter { it.second == "accepted" }.joinToString("; ") { "${it.first.kind} \"${it.first.title}\"" }
+                else -> "declined"
+            }
+            "- From $sender, \"$title\" → $outcome"
+        }
     }
 
     /** Inputs of the last two weeks, newest first, with their suggestions. */
@@ -225,14 +313,20 @@ class TriageService(
         val now = Instant.now(clock)
         val images = attachments.forInput(input.id).filter { it.contentType.startsWith("image/") }.map { it.id }
         try {
-            val result = capture.analyze(AnalyzeRequest(input.text, images), openTasks = true)
-            result.items.forEachIndexed { i, p ->
+            val mail = input.source == "mail"
+            val result = capture.analyze(AnalyzeRequest(input.text, images), openTasks = true, guidance = if (mail) mailGuidance(input) else null, light = mail)
+            // "nothing" keeps its reason but no suggestions.
+            val items = if (mail && result.verdict == "nothing") emptyList() else result.items
+            items.forEachIndexed { i, p ->
                 db.sql("insert into triage_items (id, input_id, position, proposal, same_as) values (:id, :input, :pos, :proposal, :same)")
                     .bind("id", UUID.randomUUID()).bind("input", input.id).bind("pos", i).bind("proposal", Json.of(mapper.writeValueAsString(p)))
                     .let { s -> p.sameAs?.let { s.bind("same", it) } ?: s.bindNull("same", java.lang.Long::class.java) }
                     .fetch().awaitRowsUpdated()
             }
-            db.sql("update triage_inputs set status = 'done', error = null, analyzed_at = :now where id = :id").bind("now", now).bind("id", input.id)
+            db.sql("update triage_inputs set status = 'done', error = null, analyzed_at = :now, verdict = :verdict, reason = :reason where id = :id")
+                .bind("now", now).bind("id", input.id)
+                .let { s -> result.verdict?.takeIf { mail }?.let { s.bind("verdict", it) } ?: s.bindNull("verdict", String::class.java) }
+                .let { s -> result.reason?.let { s.bind("reason", it.take(500)) } ?: s.bindNull("reason", String::class.java) }
                 .fetch().awaitRowsUpdated()
         } catch (e: ApiException) {
             // Not connected (or connection lost): wait without counting it as a failed try.
@@ -268,6 +362,7 @@ class TriageService(
     private data class InputRow(
         val id: UUID, val source: String, val text: String, val title: String, val link: String?, val status: String,
         val attempts: Int, val error: String?, val createdAt: Instant, val analyzedAt: Instant?,
+        val sender: String?, val verdict: String?, val reason: String?,
     )
 
     private inner class ItemRow(val id: UUID, val inputId: UUID, val proposal: Proposal, val sameAs: Long?, val status: String, val result: String?) {
@@ -277,6 +372,7 @@ class TriageService(
     private fun inputRow(r: io.r2dbc.spi.Readable) = InputRow(
         r.req("id"), r.req("source"), r.req("text"), r.req("title"), r.opt("link"), r.req("status"),
         r.req("attempts"), r.opt("error"), r.req("created_at"), r.opt("analyzed_at"),
+        r.opt("sender"), r.opt("verdict"), r.opt("reason"),
     )
 
     private fun itemRow(r: io.r2dbc.spi.Readable) = ItemRow(
@@ -290,7 +386,8 @@ class TriageService(
     private suspend fun render(i: InputRow): TriageInputResponse {
         val items = db.sql("select * from triage_items where input_id = :id order by position").bind("id", i.id).map(::itemRow).flow().toList()
         return TriageInputResponse(
-            i.id, i.source, i.title, i.text, i.link, i.status, i.error, attachments.forInput(i.id), items.map { it.response() }, i.createdAt, i.analyzedAt,
+            i.id, i.source, i.title, i.text, i.link, i.status, i.error, i.sender, i.verdict, i.reason, attachments.forInput(i.id), items.map { it.response() },
+            i.createdAt, i.analyzedAt,
         )
     }
 
@@ -301,6 +398,15 @@ class TriageService(
         const val TEXT_LIMIT = 20_000
         const val MAX_ATTEMPTS = 4
         val WAIT_FOR_MODEL: Duration = Duration.ofMinutes(5)
+
+        /** A starting point; the user edits it in Triage. */
+        val DEFAULT_PROFILE = """
+            I'm a POSTECH undergraduate student (무은재학부, going into CSE).
+            Matters to me: deadlines, exams, class changes, anything asking me to submit, reply, register or pay, meetings I'm
+            part of, notices for my dorm, tuition and scholarships.
+            Doesn't matter: seminars and talks (unless CS or AI), notices for graduate students or other departments, job ads,
+            office reorganizations, newsletters, optional surveys.
+        """.trimIndent()
     }
 }
 
@@ -318,6 +424,13 @@ class TriageController(private val service: TriageService) {
     @PostMapping("/inputs")
     @ResponseStatus(HttpStatus.ACCEPTED)
     suspend fun submitTriage(@RequestBody req: SubmitRequest): TriageInputResponse = service.submit(req)
+
+    /** What the model is told about you, to judge which mail matters. */
+    @GetMapping("/profile")
+    suspend fun triageProfile(): TriageProfile = service.profile()
+
+    @PutMapping("/profile")
+    suspend fun setTriageProfile(@RequestBody profile: TriageProfile): TriageProfile = service.setProfile(profile)
 
     @PostMapping("/inputs/{id}/retry")
     suspend fun retryTriage(@PathVariable id: UUID): TriageInputResponse = service.retry(id)

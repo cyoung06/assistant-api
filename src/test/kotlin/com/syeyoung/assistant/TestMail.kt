@@ -53,6 +53,9 @@ object TestMail {
 
     fun reset() {
         greenMail.purgeEmailFromAllMailboxes()
+        val user = greenMail.userManager.getUser(USER)
+        greenMail.managers.imapHostManager.listMailboxes(user, "*").filter { it.name != "INBOX" }
+            .forEach { runCatching { greenMail.managers.imapHostManager.deleteMailbox(user, it.name) } }
         polls.set(0)
         refreshFails = false
     }
@@ -75,6 +78,30 @@ object TestMail {
         val stored = inbox.messages.last()
         if (flagged) stored.setFlag(Flags.Flag.FLAGGED, true)
         if (answered) stored.setFlag(Flags.Flag.ANSWERED, true)
+    }
+
+    /** Puts a message in [folder] (made if missing), as a server rule or another client would. */
+    fun deliverTo(folder: String, subject: String, messageId: String, to: String = USER, from: String = "prof@postech.ac.kr", body: String = "Please reply.") {
+        val message = object : MimeMessage(Session.getInstance(Properties())) {
+            override fun updateMessageID() {}
+        }.apply {
+            setFrom(InternetAddress(from, "Sender"))
+            setRecipients(jakarta.mail.Message.RecipientType.TO, to)
+            setSubject(subject, "UTF-8")
+            setText(body, "UTF-8")
+            setHeader("Message-ID", "<$messageId>")
+        }
+        val user = greenMail.userManager.getUser(USER)
+        val manager = greenMail.managers.imapHostManager
+        val target = if (folder == "INBOX") manager.getInbox(user) else runCatching { manager.getFolder(user, folder, true) }.getOrNull() ?: manager.createMailbox(user, folder)
+        target.appendMessage(message, Flags(), java.util.Date())
+    }
+
+    /** Whether any copy of the message is marked read. */
+    fun isSeen(messageId: String): Boolean {
+        val user = greenMail.userManager.getUser(USER)
+        return greenMail.managers.imapHostManager.listMailboxes(user, "*").flatMap { it.messages }
+            .filter { it.mimeMessage.messageID == "<$messageId>" }.any { it.isSet(Flags.Flag.SEEN) }
     }
 
     fun setFlag(messageId: String, flag: Flags.Flag, value: Boolean) {
