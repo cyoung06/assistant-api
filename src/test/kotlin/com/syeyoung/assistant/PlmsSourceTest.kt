@@ -58,4 +58,19 @@ class PlmsSourceTest {
         assertThat(record.dueTime).isEqualTo(LocalTime.MIDNIGHT)
         assertThat(record.tags).containsExactly(SourceTag("module:assign", "assignment"))
     }
+
+    @Test
+    fun `an assignment's instructions and attached files come from its page`() {
+        val html = """
+            <div class="activity-header"><div class="activity-description" id="intro">
+              <div class="box py-3 generalbox boxaligncenter"><div class="no-overflow"><p>Solve <b>all</b> problems.</p><p>See <a href="https://x/y">the notes</a>.</p></div></div>
+              <div id="assign_files_tree68f1"><ul><li><div><a href="https://plms.postech.ac.kr/pluginfile.php/123/mod_assign/introattachment/0/HW%201.pdf?forcedownload=1">HW 1.pdf</a></div></li></ul></div>
+            </div></div>
+            <div class="submissionstatustable">Not graded</div>
+        """.trimIndent()
+        val a = com.syeyoung.assistant.source.plms.PlmsClient.parseAssignment(html)
+        assertThat(a.attachments.map { it.name }).containsExactly("HW 1.pdf")
+        assertThat(a.attachments.single().url).isEqualTo("https://plms.postech.ac.kr/pluginfile.php/123/mod_assign/introattachment/0/HW%201.pdf?forcedownload=1")
+        assertThat(PlmsSource.htmlToMarkdown(a.introHtml)).isEqualTo("Solve all problems.\n\nSee [the notes](https://x/y).")
+    }
 }

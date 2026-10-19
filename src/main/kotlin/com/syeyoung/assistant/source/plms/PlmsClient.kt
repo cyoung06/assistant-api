@@ -81,9 +81,21 @@ class PlmsClient(
     /** A course's sections and their activities, files included (core_course_get_contents). */
     suspend fun courseContents(courseId: Long): JsonNode = rest("core_course_get_contents", "courseid" to courseId.toString())
 
-    /** A course's assignments, with the files attached to them (mod_assign_get_assignments). */
-    suspend fun assignments(courseId: Long): JsonNode =
-        rest("mod_assign_get_assignments", "courseids[0]" to courseId.toString()).path("courses").firstOrNull()?.path("assignments") ?: mapper.createArrayNode()
+    /** An assignment as its page shows it: the instructions (HTML) and the files attached to them. */
+    class Assignment(val introHtml: String, val attachments: List<Attachment>)
+    class Attachment(val name: String, val url: String)
+
+    private val assignmentPages = java.util.concurrent.ConcurrentHashMap<Long, Pair<Instant, Assignment>>()
+
+    /**
+     * The assignment with course module id [cmid], read from its page (the web service that lists
+     * assignments isn't open to the token PLMS's pages carry). Kept for an hour.
+     */
+    suspend fun assignment(cmid: Long): Assignment {
+        assignmentPages[cmid]?.let { (at, a) -> if (Instant.now() < at.plus(Duration.ofHours(1))) return a }
+        return parseAssignment(page("$baseUrl/mod/assign/view.php?id=$cmid")).also { assignmentPages[cmid] = Instant.now() to it }
+    }
+
 
     /** A Moodle REST web service call with the token PLMS's pages carry. */
     private suspend fun rest(function: String, vararg args: Pair<String, String>): JsonNode {
@@ -103,7 +115,8 @@ class PlmsClient(
 
     /** A course file's contents, from the download link course contents give. */
     suspend fun download(fileUrl: String): HttpResponse<java.io.InputStream> {
-        val url = fileUrl + (if ('?' in fileUrl) "&" else "?") + "token=" + URLEncoder.encode(wsToken(), Charsets.UTF_8)
+        // Links from pages (not the web service) are for a browser session: the token works with the web service's.
+        val url = fileUrl.replace(Regex("""(?<!/webservice)/pluginfile\.php/"""), "/webservice/pluginfile.php/").let { it + if ('?' in it) "&" else "?" } + "token=" + URLEncoder.encode(wsToken(), Charsets.UTF_8)
         val r = http.sendAsync(
             HttpRequest.newBuilder(URI(url)).timeout(Duration.ofMinutes(30)).header("User-Agent", USER_AGENT).GET().build(),
             HttpResponse.BodyHandlers.ofInputStream(),
@@ -179,14 +192,42 @@ class PlmsClient(
     private fun formEncode(vararg pairs: Pair<String, String>) =
         pairs.joinToString("&") { (k, v) -> "${URLEncoder.encode(k, Charsets.UTF_8)}=${URLEncoder.encode(v, Charsets.UTF_8)}" }
 
-    private companion object {
-        const val PAGE = 50
-        const val USER_AGENT = "assistant-sync/1.0"
-        val LOGIN_TOKEN = Regex("""name="logintoken" value="([^"]+)"""")
-        val SESSKEY = Regex(""""sesskey":"([^"]+)"""")
-        val WS_TOKEN = Regex("""MOODLE_WSTOKEN = "([0-9a-f]+)"""")
-        val TOKEN_ERRORS = setOf("invalidtoken")
-        val LOGIN_BACKOFF: Duration = Duration.ofMinutes(30)
-        val SESSION_ERRORS = setOf("servicerequireslogin", "invalidsesskey", "requireloginerror", "sitepolicynotagreed")
+    companion object {
+        /** An assignment page's instructions and attached files. */
+        fun parseAssignment(html: String): Assignment {
+            val attachments = INTRO_ATTACHMENT.findAll(html).map { it.groupValues[1].replace("&amp;", "&") }.distinct().map { url ->
+                Attachment(java.net.URLDecoder.decode(url.substringBefore('?').substringAfterLast('/'), Charsets.UTF_8), url)
+            }.toList()
+            // The instructions: what's in the intro box, without the attached files' list.
+            val intro = element(html, html.indexOf("id=\"intro\""))?.let { box ->
+                val tree = box.indexOf("assign_files_tree").takeIf { it >= 0 }?.let { element(box, it) }
+                if (tree != null) box.replace(tree, "") else box
+            }.orEmpty()
+            return Assignment(intro, attachments)
+        }
+
+        /** The whole element (its tags too) whose opening tag contains [at]; null if there's none. */
+        private fun element(html: String, at: Int): String? {
+            if (at < 0) return null
+            val open = html.lastIndexOf('<', at).takeIf { it >= 0 } ?: return null
+            val tag = Regex("""<(\w+)""").find(html, open)?.groupValues?.get(1) ?: return null
+            val tags = Regex("""<(/?)$tag\b[^>]*>""", RegexOption.IGNORE_CASE)
+            var depth = 0
+            for (m in tags.findAll(html, open)) {
+                depth += if (m.groupValues[1].isEmpty()) 1 else -1
+                if (depth == 0) return html.substring(open, m.range.last + 1)
+            }
+            return null
+        }
+
+        private const val PAGE = 50
+        private const val USER_AGENT = "assistant-sync/1.0"
+        private val LOGIN_TOKEN = Regex("""name="logintoken" value="([^"]+)"""")
+        private val SESSKEY = Regex(""""sesskey":"([^"]+)"""")
+        private val WS_TOKEN = Regex("""MOODLE_WSTOKEN = "([0-9a-f]+)"""")
+        private val TOKEN_ERRORS = setOf("invalidtoken")
+        private val INTRO_ATTACHMENT = Regex("""href="([^"]*/pluginfile\.php/\d+/mod_assign/introattachment/[^"]+)"""")
+        private val LOGIN_BACKOFF: Duration = Duration.ofMinutes(30)
+        private val SESSION_ERRORS = setOf("servicerequireslogin", "invalidsesskey", "requireloginerror", "sitepolicynotagreed")
     }
 }

@@ -75,7 +75,8 @@ class PlmsFiles(
         for ((course, courseName) in courses) {
             val project = projectOf(course, courseName) ?: continue
             val folder = drive.folderOf(project.id) + DriveService.COURSE_FILES + "/"
-            val all = files(plms.client.courseContents(course), folder) + runCatching { assignmentFiles(plms.client.assignments(course)) }.onFailure { log.warn("PLMS assignment files of course {}: {}", course, it.toString()) }.getOrDefault(emptyList())
+            val contents = plms.client.courseContents(course)
+            val all = files(contents, folder) + assignmentFiles(contents)
             val taken = (dav.list(folder)?.map { it.path }.orEmpty()).toMutableSet()
             for (file in all) {
                 val previous = known[file.key]
@@ -120,20 +121,15 @@ class PlmsFiles(
         while (true) { val p = path.substring(0, dot) + " ($n)" + path.substring(dot); if (p !in taken) return p; n++ }
     }
 
-    /** The files attached to the course's assignments (handouts, starter code), in Course files too. */
-    private fun assignmentFiles(assignments: JsonNode): List<CourseFile> = assignments.flatMap { a ->
-        a.path("introattachments").filter { it.path("fileurl").asString("").isNotBlank() }.map { f ->
-            CourseFile(
-                key = "assign/${a.path("cmid").asLong()}/${f.path("filepath").asString("/")}${f.path("filename").asString("")}",
-                url = f.path("fileurl").asString(""),
-                name = DriveService.safeName(f.path("filename").asString("file")),
-                subfolder = "",
-                size = f.path("filesize").asLong(0),
-                modified = f.path("timemodified").asLong(0),
-                mime = f.path("mimetype").asString(null),
-            )
+    /** The files attached to the course's assignments (handouts, starter code), in Course files too; read from each assignment's page. */
+    private suspend fun assignmentFiles(contents: JsonNode): List<CourseFile> =
+        contents.flatMap { it.path("modules") }.filter { it.path("modname").asString("") == "assign" }.flatMap { m ->
+            val cmid = m.path("id").asLong()
+            val a = runCatching { plms.client.assignment(cmid) }.onFailure { log.warn("PLMS assignment {}: {}", cmid, it.toString()) }.getOrNull() ?: return@flatMap emptyList()
+            a.attachments.map { f ->
+                CourseFile(key = assignmentKey(cmid, f.name), url = f.url, name = DriveService.safeName(f.name), subfolder = "", size = 0, modified = 0, mime = null)
+            }
         }
-    }
 
     private class CourseFile(val key: String, val url: String, val name: String, val subfolder: String, val size: Long, val modified: Long, val mime: String?)
 
@@ -180,6 +176,9 @@ class PlmsFiles(
     fun stop() = scope.cancel()
 
     companion object {
+        /** Where an assignment's attached file is recorded among the copied files. */
+        fun assignmentKey(cmid: Long, name: String) = "assign/$cmid/$name"
+
         /** "Lecture 3.pdf" updated on a day: "Lecture 3 (updated 2026-10-21).pdf". */
         fun updatedName(name: String, at: Instant, zone: ZoneId = ZoneId.of("Asia/Seoul")): String {
             val day: LocalDate = at.atZone(zone).toLocalDate()

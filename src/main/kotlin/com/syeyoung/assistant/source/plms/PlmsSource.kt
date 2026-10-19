@@ -47,29 +47,24 @@ class PlmsSource(private val props: AppProperties, private val mapper: ObjectMap
      * files, linked to their copies in the course's folder (shown in the app, once copied there), else to PLMS.
      */
     private suspend fun assignmentNotes(events: List<JsonNode>): Map<Long, String> {
-        val courses = events.filter { it.path("modulename").asString("") == "assign" }.map { it.path("course").path("id").asLong() }.filter { it > 0 }.distinct()
-        if (courses.isEmpty()) return emptyMap()
+        val assignments = events.filter { it.path("modulename").asString("") == "assign" }
+        if (assignments.isEmpty()) return emptyMap()
         val copies = db.sql("select key, path from plms_files where key like 'assign/%'").map { r -> r.get("key", String::class.java)!! to r.get("path", String::class.java)!! }
             .flow().toList().toMap()
         val base = props.publicUrl.trimEnd('/')
         val notes = mutableMapOf<Long, String>()
-        for (course in courses) {
-            val assignments = runCatching { client.assignments(course) }.onFailure { log.warn("PLMS assignments of course {}: {}", course, it.toString()) }.getOrNull() ?: continue
-            log.debug("PLMS course {}: {} assignments", course, assignments.size())
-            for (a in assignments) {
-                val text = htmlToMarkdown(a.path("intro").asString(""))
-                val files: List<String> = a.path("introattachments").toList().map { f ->
-                    val name = f.path("filename").asString("file")
-                    val key = "assign/${a.path("cmid").asLong()}/${f.path("filepath").asString("/")}$name"
-                    val link = copies[key]?.let { path -> "$base/files/" + path.removePrefix("Projects/").split('/').joinToString("/") { java.net.URLEncoder.encode(it, Charsets.UTF_8).replace("+", "%20") } }
-                        ?: f.path("fileurl").asString("").replace("/webservice/pluginfile.php/", "/pluginfile.php/")
-                    "- [${name.replace("[", "\\[").replace("]", "\\]")}]($link)"
-                }
-                val body = listOfNotNull(text.ifBlank { null }, files.takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "Files:\n")).joinToString("\n\n")
-                if (body.isNotBlank()) notes[a.path("id").asLong()] = body
+        for (e in assignments) {
+            val cmid = cmidOf(e) ?: continue
+            val a = runCatching { client.assignment(cmid) }.onFailure { log.warn("PLMS assignment {}: {}", cmid, it.toString()) }.getOrNull() ?: continue
+            val files = a.attachments.map { f ->
+                val link = copies[PlmsFiles.assignmentKey(cmid, f.name)]?.let { path -> "$base/files/" + path.removePrefix("Projects/").split('/').joinToString("/") { java.net.URLEncoder.encode(it, Charsets.UTF_8).replace("+", "%20") } }
+                    ?: f.url
+                "- [${f.name.replace("[", "\\[").replace("]", "\\]")}]($link)"
             }
+            val body = listOfNotNull(htmlToMarkdown(a.introHtml).ifBlank { null }, files.takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "Files:\n")).joinToString("\n\n")
+            if (body.isNotBlank()) notes[e.path("instance").asLong()] = body
         }
-        log.info("PLMS assignment descriptions: {} of {} courses' assignments", notes.size, courses.size)
+        log.info("PLMS assignment descriptions: {} of {} assignments", notes.size, assignments.size)
         return notes
     }
 
@@ -107,6 +102,10 @@ class PlmsSource(private val props: AppProperties, private val mapper: ObjectMap
                 .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
             return t.lines().joinToString("\n") { it.trim() }.replace(Regex("""\n{3,}"""), "\n\n").trim()
         }
+
+        /** The course module id of an event's activity (its link is …/view.php?id=<cmid>). */
+        fun cmidOf(event: JsonNode): Long? =
+            Regex("""[?&]id=(\d+)""").find(event.path("url").asString(""))?.groupValues?.get(1)?.toLongOrNull()
 
         fun toRecord(event: JsonNode, zone: ZoneId, notes: String? = null): SourceRecord {
             val module = event.path("modulename").asString("")
