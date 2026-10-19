@@ -8,6 +8,7 @@ import java.time.Instant
 enum class RefKind(@get:JsonValue val wire: String) {
     TASK("task"), PROJECT("project"), EVENT("event"), MAIL("mail"),
     PLMS_COURSE("plms_course"), PLMS_FILE("plms_file"), PLMS_NOTICE("plms_notice"), PLMS_ASSIGNMENT("plms_assignment"), PLMS_ACTIVITY("plms_activity"),
+    GITHUB_REPO("github_repo"), GITHUB_ISSUE("github_issue"), GITHUB_PR("github_pr"),
     LINK("link");
 
     companion object {

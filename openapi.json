@@ -450,6 +450,27 @@
         "required" : [ "createdAt", "path" ],
         "type" : "object"
       },
+      "GitHubAccount" : {
+        "properties" : {
+          "connected" : {
+            "type" : "boolean"
+          },
+          "login" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "connected" ],
+        "type" : "object"
+      },
+      "GitHubToken" : {
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "token" ],
+        "type" : "object"
+      },
       "InitiativeResponse" : {
         "properties" : {
           "description" : {
@@ -922,7 +943,7 @@
             "type" : [ "string", "null" ]
           },
           "kind" : {
-            "enum" : [ "task", "project", "event", "mail", "plms_course", "plms_file", "plms_notice", "plms_assignment", "plms_activity", "link" ],
+            "enum" : [ "task", "project", "event", "mail", "plms_course", "plms_file", "plms_notice", "plms_assignment", "plms_activity", "github_repo", "github_issue", "github_pr", "link" ],
             "type" : "string"
           },
           "title" : {
@@ -1041,7 +1062,7 @@
             "type" : "boolean"
           },
           "type" : {
-            "enum" : [ "manual", "plms", "email", "upload", "ical" ],
+            "enum" : [ "manual", "plms", "email", "upload", "ical", "contests" ],
             "type" : "string"
           }
         },
@@ -1777,6 +1798,60 @@
           }
         },
         "tags" : [ "calendar-controller" ]
+      }
+    },
+    "/api/v1/github/account" : {
+      "delete" : {
+        "operationId" : "disconnectGithub",
+        "responses" : {
+          "204" : {
+            "content" : { },
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "git-hub-controller" ]
+      },
+      "get" : {
+        "operationId" : "githubAccount",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GitHubAccount"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "git-hub-controller" ]
+      },
+      "put" : {
+        "operationId" : "connectGithub",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/GitHubToken"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GitHubAccount"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "git-hub-controller" ]
       }
     },
     "/api/v1/ical/feed" : {

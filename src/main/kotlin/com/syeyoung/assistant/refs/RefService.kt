@@ -33,6 +33,7 @@ class RefService(
     private val events: EventRefs,
     private val index: RefIndex,
     private val mail: MailRefs,
+    private val github: GitHubRefs,
     private val plms: PlmsSource,
     private val catalog: PlmsCatalog,
     private val taskRepo: TaskRepository,
@@ -47,7 +48,7 @@ class RefService(
 
     /** Everything matching [query], from every provider at once; mail gets a few seconds at most. */
     suspend fun search(query: String, limit: Int): List<Ref> = coroutineScope {
-        val providers = listOf(tasks to 2_000L, events to 2_000L, index to 2_000L, mail to 4_000L)
+        val providers = listOf(tasks to 2_000L, events to 2_000L, index to 2_000L, mail to 4_000L, github to 3_000L)
         val results = providers.map { (p, timeout) ->
             async {
                 withTimeoutOrNull(timeout) { runCatching { p.search(query, limit) }.onFailure { log.debug("ref search failed: {}", it.toString()) }.getOrNull() }.orEmpty()
@@ -75,6 +76,7 @@ class RefService(
             }
             provider.resolve(link)?.let { return it }
         }
+        if (uri.host == "github.com") github.resolve(link)?.let { return it }
         if (uri.host == plmsHost) {
             val canonical = catalog.canonical(link)
             val plmsLink = PlmsLinks.fromWeb(canonical, plmsBase)

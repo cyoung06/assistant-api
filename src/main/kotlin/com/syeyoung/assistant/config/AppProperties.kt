@@ -16,6 +16,7 @@ data class AppProperties(
     val publicHost: String = "",
     val sources: Sources = Sources(),
     val llm: Llm = Llm(),
+    val github: Github = Github(),
     val dav: Dav = Dav(),
 ) {
     /** The CalDAV server (Radicale) holding events and todos. */
@@ -31,7 +32,16 @@ data class AppProperties(
         val plms: Plms = Plms(),
         val ical: Ical = Ical(),
         val mail: Mail = Mail(),
+        val contests: Contests = Contests(),
     ) {
+        /** Upcoming programming contests as events: AtCoder (by contest ID prefix) and Codeforces (by name). */
+        data class Contests(
+            val enabled: Boolean = true,
+            val interval: Duration = Duration.ofHours(6),
+            val atcoder: List<String> = listOf("abc", "arc", "agc"),
+            val codeforces: List<String> = listOf("Div. 1", "Div. 2", "Div. 3", "Div. 4", "Educational"),
+        )
+
         /**
          * Microsoft 365 mail (POSTECH's Outlook) over IMAP with OAuth. [clientId] is our app
          * registration in Microsoft Entra (a public client: no secret); empty turns the source off.
@@ -82,6 +92,9 @@ data class AppProperties(
      * The model that reads shared screenshots and text on request (capture), used through a ChatGPT
      * sign-in (Codex's OAuth client), so it runs on the account's Codex quota rather than an API key.
      */
+    /** GitHub, for references to repos, issues and pull requests. */
+    data class Github(val apiUrl: String = "https://api.github.com", val webUrl: String = "https://github.com")
+
     data class Llm(
         val issuer: String = "https://auth.openai.com",
         val clientId: String = "app_EMoamEEZ73f0CkXaXp7hrann",
