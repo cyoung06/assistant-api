@@ -26,6 +26,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.slf4j.LoggerFactory
+import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.PostMapping
@@ -98,6 +99,8 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
                 ClientRequest.from(req).headers { h ->
                     h.setBearerAuth(c.accessToken)
                     h.set("ChatGPT-Account-Id", c.accountId)
+                    // Koog's WebClient adapter labels streaming requests text/plain; the backend wants JSON.
+                    h.contentType = MediaType.APPLICATION_JSON
                 }.build()
             }
         }

@@ -75,6 +75,7 @@ class ChatGptTest : ApiTestBase() {
 
         assertThat(TestOpenAI.lastHeaders["authorization"]).startsWith("Bearer ey")
         assertThat(TestOpenAI.lastHeaders["chatgpt-account-id"]).isEqualTo(TestOpenAI.ACCOUNT)
+        assertThat(TestOpenAI.lastHeaders["content-type"]).startsWith("application/json")
         val body = mapper.readTree(TestOpenAI.lastBody)
         assertThat(body.path("model").asString()).isEqualTo("gpt-6-luna")
         assertThat(body.path("instructions").asString()).isEqualTo("Find tasks.")
