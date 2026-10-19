@@ -143,6 +143,7 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
     }
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * The event stream without the Codex backend's own events (e.g. "response.metadata"), which
@@ -176,7 +177,12 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
             pending.write(chunk)
             complete(false)
         }.concatWith(Flux.defer { Flux.fromIterable(complete(true)) })
-            .filter { e -> EVENT_TYPE.find(String(e, Charsets.UTF_8))?.groupValues?.get(1)?.let { it in STANDARD_EVENTS } ?: true }
+            .filter { e ->
+                val text = String(e, Charsets.UTF_8)
+                val keep = EVENT_TYPE.find(text)?.groupValues?.get(1)?.let { it in STANDARD_EVENTS } ?: true
+                if (!keep) log.debug("Dropped stream event: {}", text.trim().take(2000))
+                keep
+            }
             .map { DefaultDataBufferFactory.sharedInstance.wrap(it) }
     }
 
