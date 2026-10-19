@@ -81,7 +81,7 @@ class WebDav(props: AppProperties) {
         val r = send("PUT", path, publisher, headers, HttpResponse.BodyHandlers.discarding())
         if (r.statusCode() == 412) throw Changed(path)
         check(r.statusCode() in 200..299) { "PUT $path: HTTP ${r.statusCode()}" }
-        return r.headers().firstValue("ETag").orElse(null)
+        return r.headers().firstValue("ETag").orElse(null) ?: etag(path)
     }
 
     /** A write refused because the file changed since the version it was based on. */
@@ -101,19 +101,37 @@ class WebDav(props: AppProperties) {
 
     /** Moves (renames) a file or folder; fails if [to] exists. */
     suspend fun move(from: String, to: String) {
-        val code = send("MOVE", from, HttpRequest.BodyPublishers.noBody(), mapOf("Destination" to url(to), "Overwrite" to "F"), HttpResponse.BodyHandlers.discarding()).statusCode()
+        val code = collection("MOVE", from, to, mapOf("Overwrite" to "F"))
         check(code == 201 || code == 204) { "MOVE $from → $to: HTTP $code" }
     }
 
     /** Copies a file, or a folder with everything in it; fails if something is already at [to]. */
     suspend fun copy(from: String, to: String) {
-        val code = send("COPY", from, HttpRequest.BodyPublishers.noBody(), mapOf("Destination" to url(to), "Overwrite" to "F", "Depth" to "infinity"), HttpResponse.BodyHandlers.discarding()).statusCode()
+        val code = collection("COPY", from, to, mapOf("Overwrite" to "F", "Depth" to "infinity"))
         check(code == 201 || code == 204) { "COPY $from → $to: HTTP $code" }
     }
 
     suspend fun delete(path: String) {
-        val code = send("DELETE", path, HttpRequest.BodyPublishers.noBody(), emptyMap(), HttpResponse.BodyHandlers.discarding()).statusCode()
+        val code = collection("DELETE", path, null, emptyMap())
         check(code in 200..299 || code == 404) { "DELETE $path: HTTP $code" }
+    }
+
+    /**
+     * A request on a file or folder (to [to], for MOVE and COPY): a folder addressed without its
+     * "/" is redirected by the server, so it's asked again as one.
+     */
+    private suspend fun collection(method: String, path: String, to: String?, headers: Map<String, String>): Int {
+        suspend fun ask(p: String, t: String?) = send(method, p, HttpRequest.BodyPublishers.noBody(), headers + (t?.let { mapOf("Destination" to url(it)) } ?: emptyMap()), HttpResponse.BodyHandlers.discarding()).statusCode()
+        val code = ask(path, to)
+        if (code != 301 || path.endsWith("/")) return code
+        return ask("$path/", to?.let { if (it.endsWith("/")) it else "$it/" })
+    }
+
+    /** A file's current ETag; null if it has none or isn't there. */
+    suspend fun etag(path: String): String? {
+        val r = send("PROPFIND", path, ofString(PROPFIND), mapOf("Depth" to "0", "Content-Type" to "application/xml"), HttpResponse.BodyHandlers.ofString())
+        if (r.statusCode() != 207) return null
+        return responses(r.body()).firstOrNull()?.text("getetag")
     }
 
     private fun url(path: String) = base + "/" + path.trimStart('/').split('/').joinToString("/") { URLEncoder.encode(it, Charsets.UTF_8).replace("+", "%20") }

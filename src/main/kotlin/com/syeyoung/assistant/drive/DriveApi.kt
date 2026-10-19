@@ -74,7 +74,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         @RequestHeader(HttpHeaders.IF_NONE_MATCH, required = false) ifNoneMatch: String?,
     ): ResponseEntity<Flux<DataBuffer>> {
         requireEnabled()
-        val r = dav.get(safe(path), range, ifNoneMatch) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val r = dav.get(safe(path), range, ifNoneMatch?.let(::strong)) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val type = r.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_OCTET_STREAM_VALUE)
         val body = DataBufferUtils.readInputStream({ r.body() }, DefaultDataBufferFactory.sharedInstance, 64 * 1024)
         return ResponseEntity.status(r.statusCode()).contentType(MediaType.parseMediaType(type))
@@ -122,7 +122,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         try {
             DataBufferUtils.write(request.body, tmp).awaitSingleOrNull()
             val etag = try {
-                withContext(Dispatchers.IO) { Files.newInputStream(tmp) }.use { dav.put(p, it, Files.size(tmp), request.headers.contentType?.toString(), ifMatch) }
+                withContext(Dispatchers.IO) { Files.newInputStream(tmp) }.use { dav.put(p, it, Files.size(tmp), request.headers.contentType?.toString(), ifMatch?.let(::strong)) }
             } catch (e: WebDav.Changed) {
                 throw ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Changed since it was opened")
             }
@@ -197,6 +197,9 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
 
     /** In a project's Course files (what PLMS has, kept as it is there), or that folder itself. */
     private fun courseFile(p: String) = p.split('/').let { it.size >= 3 && it[0] == DriveService.PROJECTS && it[2] == DriveService.COURSE_FILES }
+
+    /** An ETag as the drive gave it: a proxy compressing the response on the way marks it weak (W/). */
+    private fun strong(etag: String) = etag.split(',').joinToString(", ") { it.trim().removePrefix("W/") }
 
     private fun requireEnabled() {
         if (!drive.enabled) throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "The drive isn't set up")
