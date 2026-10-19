@@ -24,6 +24,7 @@ import java.time.ZoneId
 @Component
 class PlmsSource(private val props: AppProperties, private val mapper: ObjectMapper, private val db: org.springframework.r2dbc.core.DatabaseClient) : DataSource {
     private val config = props.sources.plms
+    private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
     private val zone = props.zone
 
     override val type = SourceType.PLMS
@@ -36,7 +37,7 @@ class PlmsSource(private val props: AppProperties, private val mapper: ObjectMap
     override suspend fun fetch(now: Instant): SourceSnapshot {
         val from = now.minus(config.lookback)
         val events = client.actionEvents(from, now.plus(config.lookahead))
-        val details = runCatching { assignmentNotes(events) }.getOrDefault(emptyMap())
+        val details = runCatching { assignmentNotes(events) }.onFailure { log.warn("PLMS assignment descriptions: {}", it.toString()) }.getOrDefault(emptyMap())
         // Deadlines in the window that are no longer listed were submitted (or removed): done.
         return SourceSnapshot(events.map { e -> toRecord(e, zone, details[e.path("instance").asLong(0)].takeIf { e.path("modulename").asString("") == "assign" }) }, completeMissingDueFrom = from)
     }
@@ -53,7 +54,9 @@ class PlmsSource(private val props: AppProperties, private val mapper: ObjectMap
         val base = props.publicUrl.trimEnd('/')
         val notes = mutableMapOf<Long, String>()
         for (course in courses) {
-            for (a in runCatching { client.assignments(course) }.getOrNull() ?: continue) {
+            val assignments = runCatching { client.assignments(course) }.onFailure { log.warn("PLMS assignments of course {}: {}", course, it.toString()) }.getOrNull() ?: continue
+            log.debug("PLMS course {}: {} assignments", course, assignments.size())
+            for (a in assignments) {
                 val text = htmlToMarkdown(a.path("intro").asString(""))
                 val files: List<String> = a.path("introattachments").toList().map { f ->
                     val name = f.path("filename").asString("file")
@@ -66,6 +69,7 @@ class PlmsSource(private val props: AppProperties, private val mapper: ObjectMap
                 if (body.isNotBlank()) notes[a.path("id").asLong()] = body
             }
         }
+        log.info("PLMS assignment descriptions: {} of {} courses' assignments", notes.size, courses.size)
         return notes
     }
 

@@ -75,7 +75,7 @@ class PlmsFiles(
         for ((course, courseName) in courses) {
             val project = projectOf(course, courseName) ?: continue
             val folder = drive.folderOf(project.id) + DriveService.COURSE_FILES + "/"
-            val all = files(plms.client.courseContents(course), folder) + runCatching { assignmentFiles(plms.client.assignments(course)) }.getOrDefault(emptyList())
+            val all = files(plms.client.courseContents(course), folder) + runCatching { assignmentFiles(plms.client.assignments(course)) }.onFailure { log.warn("PLMS assignment files of course {}: {}", course, it.toString()) }.getOrDefault(emptyList())
             val taken = (dav.list(folder)?.map { it.path }.orEmpty()).toMutableSet()
             for (file in all) {
                 val previous = known[file.key]
