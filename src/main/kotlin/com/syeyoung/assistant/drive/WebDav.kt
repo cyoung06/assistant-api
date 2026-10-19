@@ -21,7 +21,11 @@ import java.util.Base64
 import javax.xml.parsers.DocumentBuilderFactory
 
 /** A file or folder in the drive; [path] is relative to its root, folders end with "/". */
-data class DriveEntry(val path: String, val name: String, val folder: Boolean, val size: Long, val modified: Instant?, val contentType: String?)
+data class DriveEntry(
+    val path: String, val name: String, val folder: Boolean, val size: Long, val modified: Instant?, val contentType: String?,
+    /** The file's version (as an ETag): sent back as If-Match when writing, so a newer change isn't overwritten. */
+    val etag: String? = null,
+)
 
 /** The drive's WebDAV server (RFC 4918), with basic auth. Paths are relative to its root, unencoded. */
 @Component
@@ -49,6 +53,7 @@ class WebDav(props: AppProperties) {
                 e.text("getcontentlength")?.toLongOrNull() ?: 0,
                 e.text("getlastmodified")?.let { runCatching { ZonedDateTime.parse(it, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull() },
                 e.text("getcontenttype"),
+                e.text("getetag"),
             )
         }.sortedWith(compareBy({ !it.folder }, { it.name.lowercase() }))
     }
@@ -68,18 +73,29 @@ class WebDav(props: AppProperties) {
     }
 
     /** Writes a file (its folder must exist). */
-    suspend fun put(path: String, body: InputStream, length: Long?, contentType: String?) {
+    /** Writes a file; with [ifMatch] (an ETag), only if it's still that version. Its new ETag, if the server gives one. */
+    suspend fun put(path: String, body: InputStream, length: Long?, contentType: String?, ifMatch: String? = null): String? {
         val publisher = if (length != null) HttpRequest.BodyPublishers.fromPublisher(HttpRequest.BodyPublishers.ofInputStream { body }, length)
         else HttpRequest.BodyPublishers.ofInputStream { body }
-        val code = send("PUT", path, publisher, contentType?.let { mapOf("Content-Type" to it) } ?: emptyMap(), HttpResponse.BodyHandlers.discarding()).statusCode()
-        check(code in 200..299) { "PUT $path: HTTP $code" }
+        val headers = buildMap { contentType?.let { put("Content-Type", it) }; ifMatch?.let { put("If-Match", it) } }
+        val r = send("PUT", path, publisher, headers, HttpResponse.BodyHandlers.discarding())
+        if (r.statusCode() == 412) throw Changed(path)
+        check(r.statusCode() in 200..299) { "PUT $path: HTTP ${r.statusCode()}" }
+        return r.headers().firstValue("ETag").orElse(null)
     }
 
-    /** A file's contents and type; null if it doesn't exist. */
-    suspend fun get(path: String): HttpResponse<InputStream>? {
-        val r = send("GET", path, HttpRequest.BodyPublishers.noBody(), emptyMap(), HttpResponse.BodyHandlers.ofInputStream())
+    /** A write refused because the file changed since the version it was based on. */
+    class Changed(path: String) : RuntimeException("$path changed since it was read")
+
+    /**
+     * A file's contents and type; null if it doesn't exist. [range] (a Range header) asks for part
+     * of it (206); [ifNoneMatch] (an ETag) for nothing if unchanged (304).
+     */
+    suspend fun get(path: String, range: String? = null, ifNoneMatch: String? = null): HttpResponse<InputStream>? {
+        val headers = buildMap { range?.let { put("Range", it) }; ifNoneMatch?.let { put("If-None-Match", it) } }
+        val r = send("GET", path, HttpRequest.BodyPublishers.noBody(), headers, HttpResponse.BodyHandlers.ofInputStream())
         if (r.statusCode() == 404) { r.body().close(); return null }
-        check(r.statusCode() == 200) { r.body().close(); "GET $path: HTTP ${r.statusCode()}" }
+        check(r.statusCode() in setOf(200, 206, 304, 416)) { r.body().close(); "GET $path: HTTP ${r.statusCode()}" }
         return r
     }
 
@@ -125,6 +141,6 @@ class WebDav(props: AppProperties) {
 
     private companion object {
         const val DAV = "DAV:"
-        const val PROPFIND = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/></d:prop></d:propfind>"""
+        const val PROPFIND = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><d:getetag/></d:prop></d:propfind>"""
     }
 }

@@ -319,6 +319,9 @@
           "contentType" : {
             "type" : [ "string", "null" ]
           },
+          "etag" : {
+            "type" : [ "string", "null" ]
+          },
           "folder" : {
             "type" : "boolean"
           },
@@ -1798,6 +1801,20 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "in" : "header",
+          "name" : "Range",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -1822,6 +1839,13 @@
           "in" : "query",
           "name" : "path",
           "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
           "schema" : {
             "type" : "string"
           }

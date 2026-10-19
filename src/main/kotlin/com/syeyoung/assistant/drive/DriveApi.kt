@@ -1,7 +1,12 @@
 package com.syeyoung.assistant.drive
 
 import com.syeyoung.assistant.config.AppProperties
-import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.withContext
+import org.springframework.http.HttpHeaders
+import org.springframework.web.bind.annotation.RequestHeader
+import java.nio.file.Files
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.io.buffer.DataBufferUtils
 import org.springframework.core.io.buffer.DefaultDataBufferFactory
@@ -58,20 +63,31 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         return DriveFolder(folder, dav.list(folder) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND))
     }
 
-    /** A file's contents. */
+    /**
+     * A file's contents. Ranges (for media seeking) and ETags (If-None-Match; the ETag also goes
+     * back as If-Match when writing, to not overwrite someone else's change) are passed through.
+     */
     @GetMapping("/file")
-    suspend fun readFile(@RequestParam path: String): ResponseEntity<Flux<DataBuffer>> {
+    suspend fun readFile(
+        @RequestParam path: String,
+        @RequestHeader(HttpHeaders.RANGE, required = false) range: String?,
+        @RequestHeader(HttpHeaders.IF_NONE_MATCH, required = false) ifNoneMatch: String?,
+    ): ResponseEntity<Flux<DataBuffer>> {
         requireEnabled()
-        val r = dav.get(safe(path)) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val r = dav.get(safe(path), range, ifNoneMatch) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val type = r.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_OCTET_STREAM_VALUE)
         val body = DataBufferUtils.readInputStream({ r.body() }, DefaultDataBufferFactory.sharedInstance, 64 * 1024)
-        return ResponseEntity.ok().contentType(MediaType.parseMediaType(type))
+        return ResponseEntity.status(r.statusCode()).contentType(MediaType.parseMediaType(type))
             .header("X-Content-Type-Options", "nosniff")
+            .header(HttpHeaders.ACCEPT_RANGES, "bytes")
             .apply {
                 // Files are served from the app's own address: pages among them (HTML, SVG) run nothing there.
                 // (PDFs and media are left as they are, for the browser's viewers.)
                 if (!Regex("^(application/pdf|image/(?!svg)|video/|audio/)").containsMatchIn(type)) header("Content-Security-Policy", "sandbox")
-                r.headers().firstValueAsLong("Content-Length").ifPresent { contentLength(it) } }
+                for (h in listOf(HttpHeaders.CONTENT_LENGTH, HttpHeaders.CONTENT_RANGE, HttpHeaders.ETAG, HttpHeaders.LAST_MODIFIED)) {
+                    r.headers().firstValue(h).ifPresent { header(h, it) }
+                }
+            }
             .body(body)
     }
 
@@ -85,17 +101,35 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).header("Cache-Control", "private, max-age=604800").body(jpeg)
     }
 
-    /** Writes a file (making its folder); the request body is the contents. */
+    /**
+     * Writes a file (making its folder); the request body is the contents (may be empty). With
+     * If-Match (the ETag it was read at), only if it hasn't changed since: 412 otherwise. The new
+     * ETag comes back.
+     */
     @PutMapping("/file")
-    suspend fun writeFile(@RequestParam path: String, request: ServerHttpRequest): ResponseEntity<Unit> {
+    suspend fun writeFile(
+        @RequestParam path: String,
+        @RequestHeader(HttpHeaders.IF_MATCH, required = false) ifMatch: String?,
+        request: ServerHttpRequest,
+    ): ResponseEntity<Unit> {
         requireEnabled()
         val p = safe(path)
         if (p.isEmpty() || p.endsWith("/")) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "a file path is needed")
         if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
         dav.makeFolders(p.substringBeforeLast('/', ""))
-        val bytes = DataBufferUtils.join(request.body).awaitSingle().let { buf -> ByteArray(buf.readableByteCount()).also { buf.read(it); DataBufferUtils.release(buf) } }
-        dav.put(p, bytes.inputStream(), bytes.size.toLong(), request.headers.contentType?.toString())
-        return ResponseEntity.noContent().build()
+        // Through a temporary file, not memory (scans and videos can be large).
+        val tmp = withContext(Dispatchers.IO) { Files.createTempFile("upload", null) }
+        try {
+            DataBufferUtils.write(request.body, tmp).awaitSingleOrNull()
+            val etag = try {
+                withContext(Dispatchers.IO) { Files.newInputStream(tmp) }.use { dav.put(p, it, Files.size(tmp), request.headers.contentType?.toString(), ifMatch) }
+            } catch (e: WebDav.Changed) {
+                throw ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Changed since it was opened")
+            }
+            return ResponseEntity.noContent().apply { etag?.let { header(HttpHeaders.ETAG, it) } }.build()
+        } finally {
+            withContext(Dispatchers.IO) { Files.deleteIfExists(tmp) }
+        }
     }
 
     /** Makes a folder (and its parents). */
