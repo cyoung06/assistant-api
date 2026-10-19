@@ -26,6 +26,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.slf4j.LoggerFactory
+import org.springframework.core.io.buffer.DataBuffer
+import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.core.io.buffer.DefaultDataBufferFactory
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
@@ -36,6 +39,7 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.reactive.function.client.ClientRequest
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction
 import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.time.Clock
 import java.time.LocalDate
@@ -107,7 +111,7 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
         val quota = ExchangeFilterFunction.ofResponseProcessor { res ->
             account.recordQuota(res.headers().asHttpHeaders())
             if (res.statusCode().value() == 401) account.forgetAccessToken()
-            Mono.just(res)
+            Mono.just(res.mutate().body(::standardEvents).build())
         }
         OpenAILLMClient(
             // Replaced on each request by the filter above.
@@ -140,7 +144,50 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * The event stream without the Codex backend's own events (e.g. "response.metadata"), which
+     * Koog's decoder rejects: only the standard events a text reply is made of pass. Events are cut
+     * at blank lines on the raw bytes, so text split across network chunks stays whole.
+     */
+    private fun standardEvents(body: Flux<DataBuffer>): Flux<DataBuffer> = Flux.defer {
+        val pending = java.io.ByteArrayOutputStream()
+        val complete = { flush: Boolean ->
+            val bytes = pending.toByteArray()
+            val events = mutableListOf<ByteArray>()
+            var start = 0
+            var i = 0
+            while (i < bytes.size - 1) {
+                val end = when {
+                    bytes[i] == '\n'.code.toByte() && bytes[i + 1] == '\n'.code.toByte() -> i + 2
+                    i < bytes.size - 3 && bytes[i] == '\r'.code.toByte() && bytes[i + 1] == '\n'.code.toByte() &&
+                        bytes[i + 2] == '\r'.code.toByte() && bytes[i + 3] == '\n'.code.toByte() -> i + 4
+                    else -> -1
+                }
+                if (end > 0) { events += bytes.copyOfRange(start, end); start = end; i = end } else i++
+            }
+            if (flush && start < bytes.size) { events += bytes.copyOfRange(start, bytes.size); start = bytes.size }
+            pending.reset()
+            pending.write(bytes, start, bytes.size - start)
+            events
+        }
+        body.concatMapIterable { b ->
+            val chunk = ByteArray(b.readableByteCount()).also(b::read)
+            DataBufferUtils.release(b)
+            pending.write(chunk)
+            complete(false)
+        }.concatWith(Flux.defer { Flux.fromIterable(complete(true)) })
+            .filter { e -> EVENT_TYPE.find(String(e, Charsets.UTF_8))?.groupValues?.get(1)?.let { it in STANDARD_EVENTS } ?: true }
+            .map { DefaultDataBufferFactory.sharedInstance.wrap(it) }
+    }
+
     companion object {
+        private val EVENT_TYPE = Regex("""^data:\s*\{\s*"type"\s*:\s*"([^"]+)"""", RegexOption.MULTILINE)
+        private val STANDARD_EVENTS = setOf(
+            "response.created", "response.in_progress", "response.queued", "response.completed", "response.failed", "response.incomplete", "error",
+            "response.output_item.added", "response.output_item.done", "response.content_part.added", "response.content_part.done",
+            "response.output_text.delta", "response.output_text.done", "response.refusal.delta", "response.refusal.done",
+        )
+
         /** [LlmCapture] as a strict JSON schema: every field listed, the optional ones nullable. */
         val SCHEMA = Json.parseToJsonElement(
             """

@@ -86,6 +86,10 @@ object TestOpenAI {
         }
         val events = listOf(
             "response.created" to """{"type":"response.created","sequence_number":0,"response":${response("in_progress", "[]")}}""",
+            // The Codex backend's own events, which aren't in OpenAI's public API.
+            "response.metadata" to """{"type":"response.metadata","sequence_number":1,"metadata":{"turn":"x"}}""",
+            "codex.rate_limits" to """{"type":"codex.rate_limits","sequence_number":1,"primary":{"used_percent":23.5}}""",
+            "response.reasoning_summary_part.added" to """{"type":"response.reasoning_summary_part.added","sequence_number":1,"item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}""",
             "response.output_item.added" to """{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}}""",
             "response.content_part.added" to """{"type":"response.content_part.added","sequence_number":2,"item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}""",
             "response.output_text.delta" to """{"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"delta":${quoted(text.take(half))}}""",

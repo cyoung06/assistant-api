@@ -65,12 +65,12 @@ class ChatGptTest : ApiTestBase() {
     fun `reads through the Codex backend, streaming, with the account's token`() {
         runBlocking { assertThat(model.available()).isFalse() }
         signIn()
-        TestOpenAI.reply = """{"items":[{"kind":"task","title":"HW7","description":"","dueDate":"2026-10-27","dueTime":"23:59","start":null,"end":null,"allDayDate":null,"project":null,"labels":[],"priority":null}]}"""
+        TestOpenAI.reply = """{"items":[{"kind":"task","title":"HW7 확률및통계","description":"","dueDate":"2026-10-27","dueTime":"23:59","start":null,"end":null,"allDayDate":null,"project":null,"labels":[],"priority":null}]}"""
         val result = runBlocking {
             assertThat(model.available()).isTrue()
             model.read("Find tasks.", "HW7 due Oct 27", listOf(CaptureImage(byteArrayOf(1, 2, 3), "image/png", "shot.png")))
         }
-        assertThat(result.items.single().title).isEqualTo("HW7")
+        assertThat(result.items.single().title).isEqualTo("HW7 확률및통계")
         assertThat(result.items.single().dueDate).isEqualTo("2026-10-27")
 
         assertThat(TestOpenAI.lastHeaders["authorization"]).startsWith("Bearer ey")
