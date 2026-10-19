@@ -9,7 +9,9 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.server.reactive.ServerHttpRequest
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -74,6 +76,46 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         val bytes = DataBufferUtils.join(request.body).awaitSingle().let { buf -> ByteArray(buf.readableByteCount()).also { buf.read(it); DataBufferUtils.release(buf) } }
         dav.put(p, bytes.inputStream(), bytes.size.toLong(), request.headers.contentType?.toString())
         return ResponseEntity.noContent().build()
+    }
+
+    /** Makes a folder (and its parents). */
+    @PostMapping("/folder")
+    suspend fun makeFolder(@RequestParam path: String): ResponseEntity<Unit> {
+        requireEnabled()
+        dav.makeFolders(editable(path))
+        return ResponseEntity.noContent().build()
+    }
+
+    /** Moves or renames a file or folder; fails if something is already at [to]. */
+    @PostMapping("/move")
+    suspend fun moveFile(@RequestParam from: String, @RequestParam to: String): ResponseEntity<Unit> {
+        requireEnabled()
+        val target = editable(to)
+        dav.makeFolders(target.substringBeforeLast('/', ""))
+        try {
+            dav.move(editable(from), target)
+        } catch (e: IllegalStateException) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Something is already called that")
+        }
+        return ResponseEntity.noContent().build()
+    }
+
+    /** Deletes a file or folder (with what's in it). */
+    @DeleteMapping("/file")
+    suspend fun deleteFile(@RequestParam path: String): ResponseEntity<Unit> {
+        requireEnabled()
+        dav.delete(editable(path))
+        return ResponseEntity.noContent().build()
+    }
+
+    /** A path that may be changed: not the drive's top, Projects/, or a project's own folder (those follow the projects). */
+    private fun editable(path: String): String {
+        val p = safe(path)
+        val depth = p.split('/').size
+        if (p.isEmpty() || (p.startsWith("${DriveService.PROJECTS}/") || p == DriveService.PROJECTS) && depth <= 2) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Project folders follow the projects; change the project instead")
+        }
+        return p
     }
 
     private fun requireEnabled() {
