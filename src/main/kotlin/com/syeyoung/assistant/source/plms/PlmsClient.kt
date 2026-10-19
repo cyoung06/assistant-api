@@ -91,7 +91,10 @@ class PlmsClient(
             val q = formEncode("wstoken" to wsToken(), "wsfunction" to function, "moodlewsrestformat" to "json", *args)
             val root = mapper.readTree(send(HttpRequest.newBuilder(URI("$baseUrl/webservice/rest/server.php?$q")).GET()).body())
             if (!root.isObject || !root.has("exception")) return root
-            // A stale token (a new session issues a new one): get a fresh one once.
+            val code = root.path("errorcode").asString("")
+            // Only a stale token (a new session issues a new one) is worth a fresh one; anything
+            // else (no access to that function, a bad argument) would fail again after logging in.
+            if (code !in TOKEN_ERRORS) throw PlmsException("PLMS $function: $code (${root.path("message").asString("")})")
             wsToken = null
             sesskey = null
         }
@@ -118,7 +121,11 @@ class PlmsClient(
         return send(HttpRequest.newBuilder(URI(url)).GET()).body()
     }
 
+    /** When a login last failed: no more tries for a while, so PLMS doesn't lock the account. */
+    @Volatile private var failedAt: Instant? = null
+
     private suspend fun login(): String = loginLock.withLock {
+        failedAt?.let { if (Instant.now() < it.plus(LOGIN_BACKOFF)) throw PlmsException("PLMS login failed recently; trying again after ${it.plus(LOGIN_BACKOFF)}") }
         cookies.cookieStore.removeAll()
         val form = send(HttpRequest.newBuilder(URI("$baseUrl/login/index.php")).GET())
         val token = LOGIN_TOKEN.find(form.body())?.groupValues?.get(1)
@@ -129,7 +136,11 @@ class PlmsClient(
                 .POST(HttpRequest.BodyPublishers.ofString(formEncode("anchor" to "", "logintoken" to token, "username" to username, "password" to password))),
         )
         // A failed login stays on the login page; a successful one redirects away from it.
-        if (response.uri().path.startsWith("/login/")) throw PlmsException("PLMS login failed: check the username and password")
+        if (response.uri().path.startsWith("/login/")) {
+            failedAt = Instant.now()
+            throw PlmsException("PLMS login failed: check the username and password")
+        }
+        failedAt = null
         val key = SESSKEY.find(response.body())?.groupValues?.get(1)
             ?: throw PlmsException("PLMS login succeeded but no session key was found")
         sesskey = key
@@ -174,6 +185,8 @@ class PlmsClient(
         val LOGIN_TOKEN = Regex("""name="logintoken" value="([^"]+)"""")
         val SESSKEY = Regex(""""sesskey":"([^"]+)"""")
         val WS_TOKEN = Regex("""MOODLE_WSTOKEN = "([0-9a-f]+)"""")
+        val TOKEN_ERRORS = setOf("invalidtoken")
+        val LOGIN_BACKOFF: Duration = Duration.ofMinutes(30)
         val SESSION_ERRORS = setOf("servicerequireslogin", "invalidsesskey", "requireloginerror", "sitepolicynotagreed")
     }
 }
