@@ -75,8 +75,11 @@ class WebDav(props: AppProperties) {
     /** Writes a file (its folder must exist). */
     /** Writes a file; with [ifMatch] (an ETag), only if it's still that version. Its new ETag, if the server gives one. */
     suspend fun put(path: String, body: InputStream, length: Long?, contentType: String?, ifMatch: String? = null): String? {
-        val publisher = if (length != null) HttpRequest.BodyPublishers.fromPublisher(HttpRequest.BodyPublishers.ofInputStream { body }, length)
-        else HttpRequest.BodyPublishers.ofInputStream { body }
+        val publisher = when {
+            length == 0L -> HttpRequest.BodyPublishers.noBody()
+            length != null -> HttpRequest.BodyPublishers.fromPublisher(HttpRequest.BodyPublishers.ofInputStream { body }, length)
+            else -> HttpRequest.BodyPublishers.ofInputStream { body }
+        }
         val headers = buildMap { contentType?.let { put("Content-Type", it) }; ifMatch?.let { put("If-Match", it) } }
         val r = send("PUT", path, publisher, headers, HttpResponse.BodyHandlers.discarding())
         if (r.statusCode() == 412) throw Changed(path)
