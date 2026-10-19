@@ -276,6 +276,26 @@ class ChatGptAccount(
         cached = null
     }
 
+    /** Until when the backend asked us to stop sending (after an HTTP 429); null when it hasn't. */
+    @Volatile private var limited: Instant? = null
+    val limitedUntil: Instant? get() = limited
+
+    /** A 429 ("too many requests"): wait as long as its Retry-After says (seconds or a date), else a minute. */
+    fun recordLimit(headers: HttpHeaders) {
+        val after = headers.getFirst(HttpHeaders.RETRY_AFTER)?.trim()
+        val now = Instant.now(clock)
+        val until = after?.toLongOrNull()?.let { now.plusSeconds(it) }
+            ?: after?.let { runCatching { java.time.ZonedDateTime.parse(it, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull() }
+            ?: now.plus(Duration.ofMinutes(1))
+        limited = maxOf(until, limited ?: until)
+        log.warn("Codex backend asked to slow down until {}", until)
+    }
+
+    /** For tests: as if the wait were over. */
+    internal fun clearLimit() {
+        limited = null
+    }
+
     /** Keeps the quota use the Codex backend reports with each reply (x-codex-primary-used-percent and the like). */
     fun recordQuota(headers: HttpHeaders) {
         val windows = listOf("primary", "secondary", "tertiary").mapNotNull { w ->

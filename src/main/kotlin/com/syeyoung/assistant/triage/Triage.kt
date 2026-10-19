@@ -13,6 +13,7 @@ import com.syeyoung.assistant.common.ValidationException
 import com.syeyoung.assistant.common.opt
 import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.llm.ChatGptAccount
 import com.syeyoung.assistant.refs.AppLinks
 import com.syeyoung.assistant.tasks.AttachmentInfo
 import com.syeyoung.assistant.tasks.AttachmentRepository
@@ -23,6 +24,9 @@ import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.toList
@@ -118,6 +122,7 @@ class TriageService(
     private val model: CaptureModel,
     private val tasks: TaskService,
     private val calendar: CalendarService,
+    private val account: ChatGptAccount,
     private val mapper: ObjectMapper,
     private val clock: Clock,
     private val props: AppProperties,
@@ -294,19 +299,31 @@ class TriageService(
         db.sql("delete from triage_inputs where id = :id").bind("id", inputId).fetch().awaitRowsUpdated()
     }
 
-    /** Reads every input that's due, one at a time; stops for now when the model isn't there or the day's reading is used up. */
+    /**
+     * Reads every input that's due, [AppProperties.Llm.triageConcurrency] at a time, oldest first.
+     * Stops for now when the model isn't there, the backend asked to slow down (HTTP 429), or the
+     * day's reading is used up; those inputs just wait, without counting as failed tries.
+     */
     suspend fun drain() = reading.withLock {
         while (true) {
             val now = Instant.now(clock)
-            val next = db.sql("select * from triage_inputs where status = 'pending' and retry_at <= :now order by created_at limit 1")
-                .bind("now", now).map(::inputRow).awaitOneOrNull() ?: return@withLock
-            if (!model.available()) return@withLock postpone(next.id, now.plus(WAIT_FOR_MODEL), null)
+            account.limitedUntil?.takeIf { it.isAfter(now) }?.let { until -> return@withLock postponeDue(until) }
             val dayStart = LocalDate.now(clock.withZone(props.zone)).atStartOfDay(props.zone).toInstant()
             val readToday = db.sql("select count(*) as n from triage_inputs where analyzed_at >= :start").bind("start", dayStart)
                 .map { r -> r.req<Long>("n") }.awaitOneOrNull() ?: 0
-            if (readToday >= props.llm.triageDailyLimit) return@withLock postpone(next.id, dayStart.plus(Duration.ofDays(1)), null)
-            read(next)
+            val room = (props.llm.triageDailyLimit - readToday).toInt()
+            val batch = db.sql("select * from triage_inputs where status = 'pending' and retry_at <= :now order by created_at limit :n")
+                .bind("now", now).bind("n", props.llm.triageConcurrency.coerceAtLeast(1)).map(::inputRow).flow().toList()
+            if (batch.isEmpty()) return@withLock
+            if (!model.available()) return@withLock batch.forEach { postpone(it.id, now.plus(WAIT_FOR_MODEL), null) }
+            if (room <= 0) return@withLock postponeDue(dayStart.plus(Duration.ofDays(1)))
+            coroutineScope { batch.take(room).map { async { read(it) } }.awaitAll() }
         }
+    }
+
+    /** Every due input waits until [until]. */
+    private suspend fun postponeDue(until: Instant) {
+        db.sql("update triage_inputs set retry_at = :until where status = 'pending' and retry_at < :until").bind("until", until).fetch().awaitRowsUpdated()
     }
 
     private suspend fun read(input: InputRow) {
@@ -329,8 +346,9 @@ class TriageService(
                 .let { s -> result.reason?.let { s.bind("reason", it.take(500)) } ?: s.bindNull("reason", String::class.java) }
                 .fetch().awaitRowsUpdated()
         } catch (e: ApiException) {
-            // Not connected (or connection lost): wait without counting it as a failed try.
+            // Not connected (or connection lost), or told to slow down: wait without counting it as a failed try.
             if (e is ConflictException && e.code == "not_connected") return postpone(input.id, now.plus(WAIT_FOR_MODEL), e.message)
+            account.limitedUntil?.takeIf { it.isAfter(now) }?.let { return postpone(input.id, it, "Waiting: the model asked to slow down") }
             fail(input, e.message ?: e.toString(), now)
         } catch (e: Exception) {
             fail(input, e.message ?: e.toString(), now)

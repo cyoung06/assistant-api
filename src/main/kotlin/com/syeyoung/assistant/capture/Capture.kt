@@ -123,6 +123,7 @@ class KoogCaptureModel(webClient: WebClient.Builder, private val account: ChatGp
         val quota = ExchangeFilterFunction.ofResponseProcessor { res ->
             account.recordQuota(res.headers().asHttpHeaders())
             if (res.statusCode().value() == 401) account.forgetAccessToken()
+            if (res.statusCode().value() == 429) account.recordLimit(res.headers().asHttpHeaders())
             Mono.just(res.mutate().body(::standardEvents).build())
         }
         OpenAILLMClient(

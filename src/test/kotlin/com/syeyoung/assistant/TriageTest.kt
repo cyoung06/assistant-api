@@ -16,12 +16,16 @@ import org.springframework.web.reactive.function.BodyInserters
 class TriageTest : ApiTestBase() {
     @Autowired lateinit var model: FakeCaptureModel
     @Autowired lateinit var triage: TriageService
+    @Autowired lateinit var account: com.syeyoung.assistant.llm.ChatGptAccount
 
     @BeforeEach
     fun reset() {
         model.configured = true
         model.failure = null
         model.next = LlmCapture()
+        model.delayMillis = 0
+        model.mostAtOnce.set(0)
+        account.clearLimit()
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -106,5 +110,25 @@ class TriageTest : ApiTestBase() {
         client.delete().uri("/api/v1/triage/inputs/${input["id"]}").exchange().expectStatus().isNoContent
         assertThat(inputs()).isEmpty()
         client.post().uri("/api/v1/triage/inputs").contentType(MediaType.APPLICATION_JSON).bodyValue(mapOf("text" to " ")).exchange().expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `inputs are read ten at a time, and a 429 holds the queue without counting as a failure`() {
+        model.delayMillis = 200
+        repeat(12) { submit(mapOf("text" to "note $it")) }
+        drain()
+        assertThat(inputs().map { it["status"] }.toSet()).containsExactly("done")
+        assertThat(model.mostAtOnce.get()).isEqualTo(10)
+
+        // Told to slow down: nothing is read until then, and nothing is marked failed.
+        account.recordLimit(org.springframework.http.HttpHeaders().apply { set("Retry-After", "120") })
+        submit(mapOf("text" to "waits"))
+        drain()
+        val waiting = inputs().single { it["title"] == "waits" }
+        assertThat(waiting).containsEntry("status", "pending").containsEntry("error", null)
+        account.clearLimit()
+        client.post().uri("/api/v1/triage/inputs/${waiting["id"]}/retry").exchange().expectStatus().isOk
+        drain()
+        assertThat(inputs().single { it["title"] == "waits" }["status"]).isEqualTo("done")
     }
 }

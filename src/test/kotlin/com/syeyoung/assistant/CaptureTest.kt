@@ -23,7 +23,22 @@ class FakeCaptureModel : CaptureModel {
     var failure: Exception? = null
     var lastText = ""
     var lastLight = false
+    /** How long each read takes, and the most reads seen at once. */
+    var delayMillis = 0L
+    private val running = java.util.concurrent.atomic.AtomicInteger()
+    val mostAtOnce = java.util.concurrent.atomic.AtomicInteger()
     override suspend fun read(instructions: String, text: String, images: List<CaptureImage>, light: Boolean): LlmCapture {
+        val now = running.incrementAndGet()
+        mostAtOnce.accumulateAndGet(now, ::maxOf)
+        try {
+            kotlinx.coroutines.delay(delayMillis)
+            return answer(instructions, text, images, light)
+        } finally {
+            running.decrementAndGet()
+        }
+    }
+
+    private fun answer(instructions: String, text: String, images: List<CaptureImage>, light: Boolean): LlmCapture {
         lastInstructions = instructions
         lastImages = images
         lastText = text
