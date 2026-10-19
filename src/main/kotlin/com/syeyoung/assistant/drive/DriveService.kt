@@ -102,6 +102,8 @@ class DriveService(private val dav: WebDav, private val projects: TaskRepository
     companion object {
         const val PROJECTS = "Projects"
         const val NO_PROJECT = "No project"
+        /** Each course project's files from PLMS: kept as PLMS has them (read-only here; copy one to write on it). */
+        const val COURSE_FILES = "Course files"
 
         /** A name usable as a file or folder name on any system. */
         fun safeName(name: String) = name.replace(Regex("""[/\\:*?"<>|\u0000-\u001f]"""), " ").replace(Regex("""\s+"""), " ").trim().trimEnd('.')

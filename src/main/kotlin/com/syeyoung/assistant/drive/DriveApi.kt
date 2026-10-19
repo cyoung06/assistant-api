@@ -30,6 +30,10 @@ data class DriveInfo(
 
 data class DriveFolder(val path: String, val entries: List<DriveEntry>)
 
+data class DriveCopied(val path: String)
+
+private const val READ_ONLY = "Course files are kept as PLMS has them; copy one out to change it"
+
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
@@ -87,6 +91,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         requireEnabled()
         val p = safe(path)
         if (p.isEmpty() || p.endsWith("/")) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "a file path is needed")
+        if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
         dav.makeFolders(p.substringBeforeLast('/', ""))
         val bytes = DataBufferUtils.join(request.body).awaitSingle().let { buf -> ByteArray(buf.readableByteCount()).also { buf.read(it); DataBufferUtils.release(buf) } }
         dav.put(p, bytes.inputStream(), bytes.size.toLong(), request.headers.contentType?.toString())
@@ -115,6 +120,25 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         return ResponseEntity.noContent().build()
     }
 
+    /**
+     * Copies a file or folder (with what's in it) to [to]; if something is already called that,
+     * the copy is numbered ("Notes (2).pdf"). Says where the copy went.
+     */
+    @PostMapping("/copy")
+    suspend fun copyFile(@RequestParam from: String, @RequestParam to: String): DriveCopied {
+        requireEnabled()
+        val source = safe(from)
+        if (source.isEmpty()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "nothing to copy")
+        var target = editable(to)
+        dav.makeFolders(target.substringBeforeLast('/', ""))
+        val dot = target.substringAfterLast('/').lastIndexOf('.').let { if (it <= 0 || from.endsWith("/")) -1 else target.length - target.substringAfterLast('/').length + it }
+        val (stem, ext) = if (dot < 0) target to "" else target.substring(0, dot) to target.substring(dot)
+        var n = 2
+        while (dav.exists(target)) target = "$stem (${n++})$ext"
+        dav.copy(source, target)
+        return DriveCopied(target)
+    }
+
     /** Deletes a file or folder (with what's in it). */
     @DeleteMapping("/file")
     suspend fun deleteFile(@RequestParam path: String): ResponseEntity<Unit> {
@@ -123,15 +147,22 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         return ResponseEntity.noContent().build()
     }
 
-    /** A path that may be changed: not the drive's top, Projects/, or a project's own folder (those follow the projects). */
+    /**
+     * A path that may be changed: not the drive's top, Projects/, or a project's own folder (those
+     * follow the projects), and nothing among a course's files from PLMS.
+     */
     private fun editable(path: String): String {
         val p = safe(path)
         val depth = p.split('/').size
         if (p.isEmpty() || (p.startsWith("${DriveService.PROJECTS}/") || p == DriveService.PROJECTS) && depth <= 2) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Project folders follow the projects; change the project instead")
         }
+        if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
         return p
     }
+
+    /** In a project's Course files (what PLMS has, kept as it is there), or that folder itself. */
+    private fun courseFile(p: String) = p.split('/').let { it.size >= 3 && it[0] == DriveService.PROJECTS && it[2] == DriveService.COURSE_FILES }
 
     private fun requireEnabled() {
         if (!drive.enabled) throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "The drive isn't set up")

@@ -89,6 +89,12 @@ class WebDav(props: AppProperties) {
         check(code == 201 || code == 204) { "MOVE $from → $to: HTTP $code" }
     }
 
+    /** Copies a file, or a folder with everything in it; fails if something is already at [to]. */
+    suspend fun copy(from: String, to: String) {
+        val code = send("COPY", from, HttpRequest.BodyPublishers.noBody(), mapOf("Destination" to url(to), "Overwrite" to "F", "Depth" to "infinity"), HttpResponse.BodyHandlers.discarding()).statusCode()
+        check(code == 201 || code == 204) { "COPY $from → $to: HTTP $code" }
+    }
+
     suspend fun delete(path: String) {
         val code = send("DELETE", path, HttpRequest.BodyPublishers.noBody(), emptyMap(), HttpResponse.BodyHandlers.discarding()).statusCode()
         check(code in 200..299 || code == 404) { "DELETE $path: HTTP $code" }
