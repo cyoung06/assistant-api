@@ -34,6 +34,9 @@ app:
       # "organizations" for a multi-tenant app; a single-tenant app needs its directory (tenant) ID.
       tenant: ${MAIL_TENANT:organizations}
       token-key: ${MAIL_TOKEN_KEY:}
+  github:
+    app-id: ${GITHUB_APP_ID:}
+    app-key: ${GITHUB_APP_KEY:}
   llm:
     model: ${LLM_MODEL:gpt-6-luna}
   dav:

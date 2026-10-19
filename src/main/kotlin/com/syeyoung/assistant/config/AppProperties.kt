@@ -92,8 +92,18 @@ data class AppProperties(
      * The model that reads shared screenshots and text on request (capture), used through a ChatGPT
      * sign-in (Codex's OAuth client), so it runs on the account's Codex quota rather than an API key.
      */
-    /** GitHub, for references to repos, issues and pull requests. */
-    data class Github(val apiUrl: String = "https://api.github.com", val webUrl: String = "https://github.com")
+    /**
+     * GitHub, for references to repos, issues and pull requests, through a GitHub App: [appId] and
+     * its private key [appKey] (PKCS#8 PEM). Without them only public links are named.
+     */
+    data class Github(
+        val apiUrl: String = "https://api.github.com",
+        val webUrl: String = "https://github.com",
+        val appId: String = "",
+        val appKey: String = "",
+        /** Where the App is installed on more accounts (e.g. an org). */
+        val installUrl: String = "https://github.com/apps/syeyoung-assistant/installations/new",
+    )
 
     data class Llm(
         val issuer: String = "https://auth.openai.com",

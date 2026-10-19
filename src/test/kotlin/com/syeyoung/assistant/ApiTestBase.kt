@@ -81,6 +81,8 @@ abstract class ApiTestBase {
             registry.add("app.sources.mail.imap-port") { TestMail.greenMail.imap.port }
             registry.add("app.sources.mail.imap-ssl") { "false" }
             registry.add("app.github.api-url") { TestGitHub.url }
+            registry.add("app.github.app-id") { "12345" }
+            registry.add("app.github.app-key") { TestGitHub.privateKeyPem }
             registry.add("app.llm.issuer") { TestOpenAI.url }
             registry.add("app.llm.base-url") { TestOpenAI.url + "/backend-api/codex" }
             registry.add("app.sources.mail.token-key") { "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=" }

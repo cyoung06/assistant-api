@@ -452,23 +452,23 @@
       },
       "GitHubAccount" : {
         "properties" : {
-          "connected" : {
+          "configured" : {
             "type" : "boolean"
           },
-          "login" : {
+          "error" : {
             "type" : [ "string", "null" ]
-          }
-        },
-        "required" : [ "connected" ],
-        "type" : "object"
-      },
-      "GitHubToken" : {
-        "properties" : {
-          "token" : {
+          },
+          "installUrl" : {
             "type" : "string"
+          },
+          "installations" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
           }
         },
-        "required" : [ "token" ],
+        "required" : [ "configured", "installUrl" ],
         "type" : "object"
       },
       "InitiativeResponse" : {
@@ -1801,44 +1801,8 @@
       }
     },
     "/api/v1/github/account" : {
-      "delete" : {
-        "operationId" : "disconnectGithub",
-        "responses" : {
-          "204" : {
-            "content" : { },
-            "description" : "No Content"
-          }
-        },
-        "tags" : [ "git-hub-controller" ]
-      },
       "get" : {
         "operationId" : "githubAccount",
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/GitHubAccount"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [ "git-hub-controller" ]
-      },
-      "put" : {
-        "operationId" : "connectGithub",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/GitHubToken"
-              }
-            }
-          },
-          "required" : true
-        },
         "responses" : {
           "200" : {
             "content" : {

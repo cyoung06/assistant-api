@@ -1,23 +1,15 @@
 package com.syeyoung.assistant.refs
 
-import com.syeyoung.assistant.common.TokenCipher
-import com.syeyoung.assistant.common.ValidationException
-import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.future.await
-import org.springframework.http.HttpStatus
-import org.springframework.r2dbc.core.DatabaseClient
-import org.springframework.r2dbc.core.awaitOneOrNull
-import org.springframework.r2dbc.core.awaitRowsUpdated
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.springframework.stereotype.Component
-import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PutMapping
-import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
@@ -26,90 +18,121 @@ import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
 
-data class GitHubAccount(val connected: Boolean, val login: String? = null)
-
-data class GitHubToken(val token: String)
+/** Where the GitHub App is installed: the accounts whose repos, issues and PRs can be referenced. */
+data class GitHubAccount(
+    /** The App's ID and key are set on the server. */
+    val configured: Boolean,
+    val installations: List<String> = emptyList(),
+    /** Where to install it on more accounts (e.g. an org). */
+    val installUrl: String,
+    val error: String? = null,
+)
 
 /**
- * GitHub repos, issues and pull requests as references: `@` searches your repos and the issues and
- * PRs you're involved in (with a token pasted in Sources); a pasted GitHub link is named with its
- * state. Links stay GitHub's own URLs, which open anywhere.
+ * GitHub repos, issues and pull requests as references, through a GitHub App (read-only Metadata,
+ * Issues, Pull requests): `@` searches the repos it's installed on and the issues and PRs you're
+ * involved in; a pasted GitHub link is named with its state. Links stay GitHub's own URLs, which
+ * open anywhere. The App signs in with a short JWT from its private key and gets an hour-long
+ * token per installation, refreshed as needed.
  */
 @Component
 class GitHubRefs(
-    private val db: DatabaseClient,
-    private val cipher: TokenCipher,
     private val mapper: ObjectMapper,
     private val clock: Clock,
     props: AppProperties,
 ) : RefProvider {
-    private val api = props.github.apiUrl.trimEnd('/')
-    private val web = props.github.webUrl.trimEnd('/')
+    private val config = props.github
+    private val api = config.apiUrl.trimEnd('/')
+    private val web = config.webUrl.trimEnd('/')
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+    private val key: PrivateKey? = runCatching {
+        val der = Base64.getMimeDecoder().decode(config.appKey.replace(Regex("-----[A-Z ]+-----"), ""))
+        KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(der))
+    }.getOrNull()?.takeIf { config.appId.isNotBlank() }
+    private val lock = Mutex()
 
-    @Volatile private var repos: Pair<Instant, List<Ref>>? = null
+    private data class Installation(val id: Long, val login: String)
 
-    // ---- the token ---------------------------------------------------------------------
+    @Volatile private var installations: Pair<Instant, List<Installation>>? = null
+    private val tokens = mutableMapOf<Long, Pair<String, Instant>>()
+    private val repos = mutableMapOf<Long, Pair<Instant, List<Ref>>>()
 
-    suspend fun account(): GitHubAccount = token()?.let { GitHubAccount(true, login()) } ?: GitHubAccount(false)
+    // ---- the App -----------------------------------------------------------------------
 
-    suspend fun connect(token: String): GitHubAccount {
-        val t = token.trim().ifEmpty { throw ValidationException("Paste a token") }
-        val user = runCatching { get("/user", t) }.getOrNull() ?: throw ValidationException("GitHub didn't accept that token")
-        val value = Base64.getEncoder().encodeToString(cipher.encrypt(t))
-        db.sql("insert into settings (key, value) values ('github.token', :v) on conflict (key) do update set value = :v").bind("v", value).fetch().awaitRowsUpdated()
-        db.sql("insert into settings (key, value) values ('github.login', :v) on conflict (key) do update set value = :v")
-            .bind("v", user.path("login").asString("")).fetch().awaitRowsUpdated()
-        repos = null
-        return account()
+    suspend fun account(): GitHubAccount {
+        if (key == null) return GitHubAccount(false, installUrl = config.installUrl)
+        return runCatching { GitHubAccount(true, installs().map { it.login }, config.installUrl) }
+            .getOrElse { GitHubAccount(true, installUrl = config.installUrl, error = it.message) }
     }
 
-    suspend fun disconnect() {
-        db.sql("delete from settings where key in ('github.token', 'github.login')").fetch().awaitRowsUpdated()
-        repos = null
+    /** A JWT for the App itself, valid ten minutes (GitHub's limit), a minute in the past against clock skew. */
+    private fun appJwt(): String {
+        val b64 = Base64.getUrlEncoder().withoutPadding()
+        val now = Instant.now(clock).epochSecond
+        val head = b64.encodeToString("""{"alg":"RS256","typ":"JWT"}""".toByteArray())
+        val body = b64.encodeToString("""{"iat":${now - 60},"exp":${now + 540},"iss":"${config.appId}"}""".toByteArray())
+        val sig = Signature.getInstance("SHA256withRSA").apply { initSign(key); update("$head.$body".toByteArray()) }.sign()
+        return "$head.$body.${b64.encodeToString(sig)}"
     }
 
-    private suspend fun setting(key: String) = db.sql("select value from settings where key = :k").bind("k", key).map { r -> r.req<String>("value") }.awaitOneOrNull()
+    private suspend fun installs(): List<Installation> {
+        installations?.let { (at, list) -> if (at.isAfter(Instant.now(clock).minus(CACHE))) return list }
+        val list = request("GET", "/app/installations", appJwt()).toList().map { Installation(it.path("id").asLong(), it.path("account").path("login").asString("")) }
+        installations = Instant.now(clock) to list
+        return list
+    }
 
-    private suspend fun token(): String? = setting("github.token")?.let { runCatching { cipher.decrypt(Base64.getDecoder().decode(it)) }.getOrNull() }
-
-    private suspend fun login(): String? = setting("github.login")
+    /** An installation's access token, made anew five minutes before the old one expires. */
+    private suspend fun token(i: Installation): String = lock.withLock {
+        tokens[i.id]?.let { (t, until) -> if (Instant.now(clock).isBefore(until.minus(Duration.ofMinutes(5)))) return t }
+        val res = request("POST", "/app/installations/${i.id}/access_tokens", appJwt())
+        val t = res.path("token").asString("")
+        tokens[i.id] = t to Instant.parse(res.path("expires_at").asString())
+        t
+    }
 
     // ---- references --------------------------------------------------------------------
 
     override suspend fun search(query: String, limit: Int): List<Ref> = coroutineScope {
-        val token = token() ?: return@coroutineScope emptyList()
+        if (key == null) return@coroutineScope emptyList()
         val q = query.trim().removePrefix("#")
         if (q.isEmpty()) return@coroutineScope emptyList()
-        val issues = async {
-            val login = login() ?: return@async emptyList()
-            val search = URLEncoder.encode("$q involves:$login", Charsets.UTF_8)
-            get("/search/issues?q=$search&sort=updated&per_page=$limit", token).path("items").toList().map { issueRef(it) }
-        }
         val words = q.lowercase().split(Regex("""\s+"""))
-        myRepos(token).filter { r -> words.all { it in r.title.lowercase() } }.take(limit) + issues.await()
+        installs().map { i ->
+            async {
+                val token = token(i)
+                val search = URLEncoder.encode("$q involves:${i.login}", Charsets.UTF_8)
+                val issues = async { request("GET", "/search/issues?q=$search&sort=updated&per_page=$limit", token).path("items").toList().map { issueRef(it) } }
+                installedRepos(i, token).filter { r -> words.all { it in r.title.lowercase() } }.take(limit) + issues.await()
+            }
+        }.awaitAll().flatten()
     }
 
     override suspend fun resolve(url: String): Ref? {
-        val m = LINK.find(url.removePrefix(web).let { if (it == url) return null else it }) ?: return null
-        val (owner, repo, what, number) = m.destructured
-        val token = token()
+        val path = url.removePrefix(web).takeIf { it != url } ?: return null
+        val (owner, repo, what, number) = LINK.find(path)?.destructured ?: return null
+        // The owner's installation sees private repos; anything else is read as public.
+        val token = if (key == null) null else installs().find { it.login.equals(owner, ignoreCase = true) }?.let { token(it) }
         return runCatching {
-            if (number.isEmpty()) repoRef(get("/repos/$owner/$repo", token))
-            else issueRef(get("/repos/$owner/$repo/${if (what == "pull") "pulls" else "issues"}/$number", token))
+            if (number.isEmpty()) repoRef(request("GET", "/repos/$owner/$repo", token))
+            else issueRef(request("GET", "/repos/$owner/$repo/${if (what == "pull") "pulls" else "issues"}/$number", token))
         }.getOrNull()
     }
 
-    /** Repos you own, collaborate on or belong to through an org; kept ten minutes. */
-    private suspend fun myRepos(token: String): List<Ref> {
-        repos?.let { (at, list) -> if (at.isAfter(Instant.now(clock).minus(Duration.ofMinutes(10)))) return list }
-        val list = get("/user/repos?per_page=100&sort=pushed", token).toList().map { repoRef(it) }
-        repos = Instant.now(clock) to list
+    /** The repos an installation can see; kept ten minutes. */
+    private suspend fun installedRepos(i: Installation, token: String): List<Ref> {
+        synchronized(repos) { repos[i.id] }?.let { (at, list) -> if (at.isAfter(Instant.now(clock).minus(CACHE))) return list }
+        val list = request("GET", "/installation/repositories?per_page=100", token).path("repositories").toList().map { repoRef(it) }
+        synchronized(repos) { repos[i.id] = Instant.now(clock) to list }
         return list
     }
 
@@ -137,16 +160,19 @@ class GitHubRefs(
         )
     }
 
-    private suspend fun get(path: String, token: String?): JsonNode {
+    private suspend fun request(method: String, path: String, token: String?): JsonNode {
         val req = HttpRequest.newBuilder(URI(api + path)).timeout(Duration.ofSeconds(10))
             .header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28")
-            .apply { token?.let { header("Authorization", "Bearer $it") } }.GET().build()
+            .apply { token?.let { header("Authorization", "Bearer $it") } }
+            .method(method, if (method == "POST") HttpRequest.BodyPublishers.ofString("") else HttpRequest.BodyPublishers.noBody()).build()
         val res = http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).await()
-        check(res.statusCode() in 200..299) { "GitHub answered HTTP ${res.statusCode()}" }
+        check(res.statusCode() in 200..299) { "GitHub answered HTTP ${res.statusCode()} for $path" }
         return mapper.readTree(res.body())
     }
 
     private companion object {
+        val CACHE: Duration = Duration.ofMinutes(10)
+
         /** "/owner/repo", "/owner/repo/issues/12", "/owner/repo/pull/12" (anything after is ignored). */
         val LINK = Regex("""^/([\w.-]+)/([\w.-]+)(?:/(issues|pull)/(\d+))?(?:[/?#].*)?$""")
     }
@@ -156,14 +182,7 @@ class GitHubRefs(
 @RequestMapping("/api/v1/github")
 class GitHubController(private val github: GitHubRefs) {
 
+    /** Where the GitHub App is installed; its repos, issues and PRs can be referenced with @. */
     @GetMapping("/account")
     suspend fun githubAccount(): GitHubAccount = github.account()
-
-    /** A personal access token (read-only is enough), so @ can search your repos, issues and PRs. */
-    @PutMapping("/account")
-    suspend fun connectGithub(@RequestBody req: GitHubToken): GitHubAccount = github.connect(req.token)
-
-    @DeleteMapping("/account")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    suspend fun disconnectGithub() = github.disconnect()
 }
