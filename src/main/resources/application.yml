@@ -31,6 +31,8 @@ app:
           tag: holiday
     mail:
       client-id: ${MAIL_CLIENT_ID:}
+      # "organizations" for a multi-tenant app; a single-tenant app needs its directory (tenant) ID.
+      tenant: ${MAIL_TENANT:organizations}
       token-key: ${MAIL_TOKEN_KEY:}
   llm:
     base-url: ${LLM_BASE_URL:https://api.openai.com}
