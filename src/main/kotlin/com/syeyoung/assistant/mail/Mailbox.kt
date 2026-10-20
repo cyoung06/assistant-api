@@ -138,7 +138,7 @@ class ImapMailbox(props: AppProperties) : Mailbox {
     override suspend fun message(user: String, accessToken: String, messageId: String): MailMessage? =
         inbox(user, accessToken, Folder.READ_ONLY) { f ->
             val m = f.search(MessageIDTerm(messageId)).firstOrNull() ?: return@inbox null
-            val parts = Parts().also { it.collect(m) }
+            val parts = MailParts().also { it.collect(m) }
             MailMessage(
                 messageId = messageId,
                 subject = m.subject?.trim().orEmpty(),
@@ -193,7 +193,7 @@ class ImapMailbox(props: AppProperties) : Mailbox {
     }
 
     private fun read(folder: String, m: jakarta.mail.Message): IncomingMail {
-        val parts = Parts().also { it.collect(m) }
+        val parts = MailParts().also { it.collect(m) }
         val sender = m.from?.firstOrNull() as? InternetAddress
         return IncomingMail(
             folder = folder,
@@ -209,33 +209,6 @@ class ImapMailbox(props: AppProperties) : Mailbox {
             html = parts.html,
             attachments = parts.attachments,
         )
-    }
-
-    /** The first plain-text and the first HTML body part, and the attachments' names. */
-    private class Parts {
-        var text: String? = null
-        var html: String? = null
-        val attachments = mutableListOf<String>()
-
-        fun collect(p: Part) {
-            if (Part.ATTACHMENT.equals(p.disposition, true)) {
-                p.fileName?.let { attachments += runCatching { jakarta.mail.internet.MimeUtility.decodeText(it) }.getOrDefault(it) }
-                return
-            }
-            when {
-                p.isMimeType("text/plain") && text == null -> text = p.content as? String
-                p.isMimeType("text/html") && html == null -> html = p.content as? String
-                p.isMimeType("multipart/*") -> (p.content as Multipart).let { mp -> for (i in 0 until mp.count) collect(mp.getBodyPart(i)) }
-                p.isMimeType("message/rfc822") -> {}
-            }
-        }
-    }
-
-    private fun messageIdOf(m: jakarta.mail.Message) = m.getHeader("Message-ID")?.firstOrNull()?.trim()?.removePrefix("<")?.removeSuffix(">")
-
-    private fun senderOf(m: jakarta.mail.Message): String {
-        val sender = m.from?.firstOrNull() as? InternetAddress
-        return sender?.personal?.takeIf { it.isNotBlank() }?.let { "$it <${sender.address}>" } ?: sender?.address.orEmpty()
     }
 
     private suspend fun <T> inbox(user: String, accessToken: String, mode: Int, block: (IMAPFolder) -> T): T = withStore(user, accessToken) { store ->
@@ -281,4 +254,31 @@ class ImapMailbox(props: AppProperties) : Mailbox {
             "보낸 편지함", "임시 보관함", "지운 편지함", "정크 메일", "보낼 편지함", "대화 기록", "동기화 문제", "일정", "연락처", "작업", "메모", "업무 일지",
         )
     }
+}
+
+/** The first plain-text and the first HTML body part, and the attachments' names. */
+internal class MailParts {
+    var text: String? = null
+    var html: String? = null
+    val attachments = mutableListOf<String>()
+
+    fun collect(p: Part) {
+        if (Part.ATTACHMENT.equals(p.disposition, true)) {
+            p.fileName?.let { attachments += runCatching { jakarta.mail.internet.MimeUtility.decodeText(it) }.getOrDefault(it) }
+            return
+        }
+        when {
+            p.isMimeType("text/plain") && text == null -> text = p.content as? String
+            p.isMimeType("text/html") && html == null -> html = p.content as? String
+            p.isMimeType("multipart/*") -> (p.content as Multipart).let { mp -> for (i in 0 until mp.count) collect(mp.getBodyPart(i)) }
+            p.isMimeType("message/rfc822") -> {}
+        }
+    }
+}
+
+internal fun messageIdOf(m: jakarta.mail.Message) = m.getHeader("Message-ID")?.firstOrNull()?.trim()?.removePrefix("<")?.removeSuffix(">")
+
+internal fun senderOf(m: jakarta.mail.Message): String {
+    val sender = m.from?.firstOrNull() as? InternetAddress
+    return sender?.personal?.takeIf { it.isNotBlank() }?.let { "$it <${sender.address}>" } ?: sender?.address.orEmpty()
 }

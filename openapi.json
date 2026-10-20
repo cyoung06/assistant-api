@@ -815,6 +815,24 @@
         "required" : [ "id", "name", "token" ],
         "type" : "object"
       },
+      "ParsedMail" : {
+        "properties" : {
+          "from" : {
+            "type" : "string"
+          },
+          "messageId" : {
+            "type" : [ "string", "null" ]
+          },
+          "subject" : {
+            "type" : "string"
+          },
+          "text" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "from", "subject", "text" ],
+        "type" : "object"
+      },
       "ProjectResponse" : {
         "properties" : {
           "color" : {
@@ -2538,6 +2556,35 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/MailMessage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "mail-controller" ]
+      }
+    },
+    "/api/v1/mail/parse" : {
+      "post" : {
+        "operationId" : "mailParse",
+        "requestBody" : {
+          "content" : {
+            "message/rfc822" : {
+              "schema" : {
+                "format" : "binary",
+                "type" : "string"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ParsedMail"
                 }
               }
             },
