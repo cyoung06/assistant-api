@@ -9,7 +9,10 @@ import org.apache.pdfbox.io.RandomAccessStreamCache
 import org.apache.pdfbox.io.ScratchFile
 import org.apache.pdfbox.rendering.ImageType
 import org.apache.pdfbox.rendering.PDFRenderer
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import org.springframework.core.io.buffer.DataBufferUtils
 import org.springframework.stereotype.Component
+import reactor.core.publisher.Flux
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Collections
@@ -32,14 +35,15 @@ class DriveThumbs(private val dav: WebDav) {
         val key = "$path|$version|$width"
         cache[key]?.let { return it }
         return rendering.withPermit {
-            cache[key] ?: withContext(Dispatchers.IO) {
-                val r = dav.get(path) ?: return@withContext null
-                val file = File.createTempFile("thumb", ".pdf")
+            cache[key] ?: run {
+                val r = dav.get(path) ?: return@run null
+                val file = withContext(Dispatchers.IO) { File.createTempFile("thumb", ".pdf") }
                 try {
-                    r.body().use { input -> file.outputStream().use { input.copyTo(it) } }
-                    runCatching { render(file, width) }.getOrNull()
+                    DataBufferUtils.write(r.body ?: Flux.empty(), file.toPath()).awaitSingleOrNull()
+                    // (PDFBox reads and renders blocking.)
+                    withContext(Dispatchers.IO) { runCatching { render(file, width) }.getOrNull() }
                 } finally {
-                    file.delete()
+                    withContext(Dispatchers.IO) { file.delete() }
                 }
             }?.also { cache[key] = it }
         }

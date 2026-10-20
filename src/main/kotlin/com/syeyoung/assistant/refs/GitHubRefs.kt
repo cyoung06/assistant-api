@@ -4,20 +4,19 @@ import com.syeyoung.assistant.config.AppProperties
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.future.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.springframework.http.HttpMethod
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBody
+import reactor.core.publisher.Mono
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.net.URI
-import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.security.KeyFactory
 import java.security.PrivateKey
 import java.security.Signature
@@ -49,11 +48,12 @@ class GitHubRefs(
     private val mapper: ObjectMapper,
     private val clock: Clock,
     props: AppProperties,
+    web: WebClient.Builder,
 ) : RefProvider {
     private val config = props.github
     private val api = config.apiUrl.trimEnd('/')
     private val web = config.webUrl.trimEnd('/')
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+    private val http = web.defaultHeader("Accept", "application/vnd.github+json").defaultHeader("X-GitHub-Api-Version", "2022-11-28").build()
     private val key: PrivateKey? = runCatching {
         val der = Base64.getMimeDecoder().decode(config.appKey.replace(Regex("-----[A-Z ]+-----"), ""))
         KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(der))
@@ -110,8 +110,7 @@ class GitHubRefs(
         installs().map { i ->
             async {
                 val token = token(i)
-                val search = URLEncoder.encode("$q involves:${i.login}", Charsets.UTF_8)
-                val issues = async { request("GET", "/search/issues?q=$search&sort=updated&per_page=$limit", token).path("items").toList().map { issueRef(it) } }
+                val issues = async { request("GET", "/search/issues?q={q}&sort=updated&per_page={n}", token, "$q involves:${i.login}", limit).path("items").toList().map { issueRef(it) } }
                 installedRepos(i, token).filter { r -> words.all { it in r.title.lowercase() } }.take(limit) + issues.await()
             }
         }.awaitAll().flatten()
@@ -160,15 +159,13 @@ class GitHubRefs(
         )
     }
 
-    private suspend fun request(method: String, path: String, token: String?): JsonNode {
-        val req = HttpRequest.newBuilder(URI(api + path)).timeout(Duration.ofSeconds(10))
-            .header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28")
-            .apply { token?.let { header("Authorization", "Bearer $it") } }
-            .method(method, if (method == "POST") HttpRequest.BodyPublishers.ofString("") else HttpRequest.BodyPublishers.noBody()).build()
-        val res = http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).await()
-        check(res.statusCode() in 200..299) { "GitHub answered HTTP ${res.statusCode()} for $path" }
-        return mapper.readTree(res.body())
-    }
+    /** [path] is a URI template, filled (and encoded) with [vars]. */
+    private suspend fun request(method: String, path: String, token: String?, vararg vars: Any): JsonNode =
+        http.method(HttpMethod.valueOf(method)).uri(api + path, *vars)
+            .headers { h -> token?.let { h.setBearerAuth(it) } }
+            .retrieve()
+            .onStatus({ !it.is2xxSuccessful }) { r -> Mono.error(IllegalStateException("GitHub answered HTTP ${r.statusCode().value()} for $path")) }
+            .awaitBody<JsonNode>()
 
     private companion object {
         val CACHE: Duration = Duration.ofMinutes(10)

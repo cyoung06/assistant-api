@@ -1,17 +1,26 @@
 package com.syeyoung.assistant.source.plms
 
-import kotlinx.coroutines.future.await
+import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.springframework.core.io.buffer.DataBuffer
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.web.reactive.function.BodyInserters
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBodyOrNull
+import org.springframework.web.reactive.function.client.awaitExchange
+import org.springframework.web.util.UriComponentsBuilder
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.net.CookieManager
 import java.net.CookiePolicy
 import java.net.URI
-import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
 
@@ -27,22 +36,37 @@ class PlmsClient(
     private val username: String,
     private val password: String,
     private val mapper: ObjectMapper,
+    private val failures: LoginFailures,
+    /** For the session: redirects not followed by it ([send] follows them, keeping each hop's cookies). */
+    private val session: WebClient,
+    /** For course files (no session: the web service token is in the URL). */
+    private val files: WebClient,
 ) {
+    /**
+     * Where the last failed login is kept, so the wait after it outlasts restarts. [credentials]
+     * identifies the username and password it failed with (a new password may log in at once).
+     */
+    interface LoginFailures {
+        suspend fun last(): Pair<Instant, String>?
+        suspend fun failed(at: Instant, credentials: String)
+        suspend fun cleared()
+    }
+
+    /** A hash of the username and password, to tell whether a past failure was with these. */
+    private val credentials = java.security.MessageDigest.getInstance("SHA-256")
+        .digest("$username\u0000$password".toByteArray()).joinToString("") { "%02x".format(it) }
+
+    /** The session's cookies (the JDK's RFC 6265 store, used as just that). */
     private val cookies = CookieManager(null, CookiePolicy.ACCEPT_ALL)
-    private val http = HttpClient.newBuilder()
-        .cookieHandler(cookies)
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .connectTimeout(Duration.ofSeconds(15))
-        .build()
     private val loginLock = Mutex()
     @Volatile private var sesskey: String? = null
 
     /** Calls a Moodle web service function, logging in first or again if needed. */
     suspend fun call(method: String, args: Map<String, Any?>): JsonNode {
-        val key = sesskey ?: login()
+        val key = sesskey ?: login(null)
         val first = ajax(key, method, args)
         if (first.errorCode in SESSION_ERRORS) {
-            return ajax(login(), method, args).dataOrThrow(method)
+            return ajax(login(key), method, args).dataOrThrow(method)
         }
         return first.dataOrThrow(method)
     }
@@ -100,8 +124,10 @@ class PlmsClient(
     /** A Moodle REST web service call with the token PLMS's pages carry. */
     private suspend fun rest(function: String, vararg args: Pair<String, String>): JsonNode {
         repeat(2) {
-            val q = formEncode("wstoken" to wsToken(), "wsfunction" to function, "moodlewsrestformat" to "json", *args)
-            val root = mapper.readTree(send(HttpRequest.newBuilder(URI("$baseUrl/webservice/rest/server.php?$q")).GET()).body())
+            val url = UriComponentsBuilder.fromUriString("$baseUrl/webservice/rest/server.php")
+                .apply { (listOf("wstoken" to wsToken(), "wsfunction" to function, "moodlewsrestformat" to "json") + args).forEach { (k, v) -> queryParam(k, v) } }
+                .build().encode().toUri()
+            val root = mapper.readTree(send(url).body)
             if (!root.isObject || !root.has("exception")) return root
             val code = root.path("errorcode").asString("")
             // Only a stale token (a new session issues a new one) is worth a fresh one; anything
@@ -113,48 +139,55 @@ class PlmsClient(
         throw PlmsException("PLMS $function: web service refused")
     }
 
-    /** A course file's contents, from the download link course contents give. */
-    suspend fun download(fileUrl: String): HttpResponse<java.io.InputStream> {
+    /** A course file's contents (streamed; read or release the body), from the download link course contents give. */
+    suspend fun download(fileUrl: String): ResponseEntity<Flux<DataBuffer>> {
+        // The token goes only to PLMS itself, whatever a page links to.
+        val plms = URI(baseUrl)
+        val target = URI(fileUrl)
+        if (target.scheme != plms.scheme || !target.host.equals(plms.host, ignoreCase = true) || target.port != plms.port) {
+            throw PlmsException("not a PLMS file: $fileUrl")
+        }
         // Links from pages (not the web service) are for a browser session: the token works with the web service's.
-        val url = fileUrl.replace(Regex("""(?<!/webservice)/pluginfile\.php/"""), "/webservice/pluginfile.php/").let { it + if ('?' in it) "&" else "?" } + "token=" + URLEncoder.encode(wsToken(), Charsets.UTF_8)
-        val r = http.sendAsync(
-            HttpRequest.newBuilder(URI(url)).timeout(Duration.ofMinutes(30)).header("User-Agent", USER_AGENT).GET().build(),
-            HttpResponse.BodyHandlers.ofInputStream(),
-        ).await()
-        if (r.statusCode() != 200) { r.body().close(); throw PlmsException("PLMS download: HTTP ${r.statusCode()}") }
-        return r
+        // (The link is encoded already, and the token is hex.)
+        val url = UriComponentsBuilder.fromUriString(fileUrl.replace(Regex("""(?<!/webservice)/pluginfile\.php/"""), "/webservice/pluginfile.php/"))
+            .queryParam("token", wsToken()).build(true).toUri()
+        return files.get().uri(url).header(HttpHeaders.USER_AGENT, USER_AGENT).retrieve()
+            .onStatus({ it.value() != 200 }) { r -> Mono.error(PlmsException("PLMS download: HTTP ${r.statusCode().value()}")) }
+            .toEntityFlux(DataBuffer::class.java)
+            .awaitSingle()
     }
 
     /** A PLMS page's HTML, as the logged-in user sees it. */
     suspend fun page(url: String): String {
-        if (sesskey == null) login()
-        val first = send(HttpRequest.newBuilder(URI(url)).GET())
-        if (!first.uri().path.startsWith("/login/")) return first.body()
-        login()
-        return send(HttpRequest.newBuilder(URI(url)).GET()).body()
+        val key = sesskey ?: login(null)
+        val first = send(URI(url))
+        if (!first.url.path.startsWith("/login/")) return first.body
+        login(key)
+        return send(URI(url)).body
     }
 
-    /** When a login last failed: no more tries for a while, so PLMS doesn't lock the account. */
-    @Volatile private var failedAt: Instant? = null
-
-    private suspend fun login(): String = loginLock.withLock {
-        failedAt?.let { if (Instant.now() < it.plus(LOGIN_BACKOFF)) throw PlmsException("PLMS login failed recently; trying again after ${it.plus(LOGIN_BACKOFF)}") }
+    /**
+     * Logs in, unless another caller already renewed the session [stale] was (then that one's used).
+     * After a failed login, no more tries with the same credentials for a while (restarts too), so
+     * PLMS doesn't lock the account.
+     */
+    private suspend fun login(stale: String?): String = loginLock.withLock {
+        sesskey?.let { if (it != stale) return@withLock it }
+        failures.last()?.let { (at, with) ->
+            if (with == credentials && Instant.now() < at.plus(LOGIN_BACKOFF)) throw PlmsException("PLMS login failed recently; trying again after ${at.plus(LOGIN_BACKOFF)}")
+        }
         cookies.cookieStore.removeAll()
-        val form = send(HttpRequest.newBuilder(URI("$baseUrl/login/index.php")).GET())
-        val token = LOGIN_TOKEN.find(form.body())?.groupValues?.get(1)
+        val form = send(URI("$baseUrl/login/index.php"))
+        val token = LOGIN_TOKEN.find(form.body)?.groupValues?.get(1)
             ?: throw PlmsException("PLMS login page changed: no login token found")
-        val response = send(
-            HttpRequest.newBuilder(URI("$baseUrl/login/index.php"))
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(formEncode("anchor" to "", "logintoken" to token, "username" to username, "password" to password))),
-        )
+        val response = send(URI("$baseUrl/login/index.php"), Body.Form(mapOf("anchor" to "", "logintoken" to token, "username" to username, "password" to password)))
         // A failed login stays on the login page; a successful one redirects away from it.
-        if (response.uri().path.startsWith("/login/")) {
-            failedAt = Instant.now()
+        if (response.url.path.startsWith("/login/")) {
+            failures.failed(Instant.now(), credentials)
             throw PlmsException("PLMS login failed: check the username and password")
         }
-        failedAt = null
-        val key = SESSKEY.find(response.body())?.groupValues?.get(1)
+        failures.cleared()
+        val key = SESSKEY.find(response.body)?.groupValues?.get(1)
             ?: throw PlmsException("PLMS login succeeded but no session key was found")
         sesskey = key
         key
@@ -167,13 +200,10 @@ class PlmsClient(
 
     private suspend fun ajax(key: String, method: String, args: Map<String, Any?>): AjaxResult {
         val body = mapper.writeValueAsString(listOf(mapOf("index" to 0, "methodname" to method, "args" to args)))
-        val response = send(
-            HttpRequest.newBuilder(URI("$baseUrl/lib/ajax/service.php?sesskey=$key&info=$method"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body)),
-        )
-        val root = runCatching { mapper.readTree(response.body()) }.getOrNull()
-            ?: return AjaxResult(null, "invalidresponse", "HTTP ${response.statusCode()}")
+        val url = UriComponentsBuilder.fromUriString("$baseUrl/lib/ajax/service.php").queryParam("sesskey", key).queryParam("info", method).build().encode().toUri()
+        val response = send(url, Body.Json(body))
+        val root = runCatching { mapper.readTree(response.body) }.getOrNull()
+            ?: return AjaxResult(null, "invalidresponse", "HTTP ${response.status}")
         // Moodle answers with an array of results, or a single error object for session problems.
         val result = if (root.isArray) root.path(0) else root
         if (result.path("error").asBoolean(false) || result.has("errorcode")) {
@@ -183,14 +213,44 @@ class PlmsClient(
         return AjaxResult(result.path("data"), null, null)
     }
 
-    private suspend fun send(request: HttpRequest.Builder): HttpResponse<String> =
-        http.sendAsync(
-            request.timeout(Duration.ofSeconds(30)).header("User-Agent", USER_AGENT).build(),
-            HttpResponse.BodyHandlers.ofString(),
-        ).await()
+    /** What a request sends. */
+    private sealed interface Body {
+        class Form(val fields: Map<String, String>) : Body
+        class Json(val text: String) : Body
+    }
 
-    private fun formEncode(vararg pairs: Pair<String, String>) =
-        pairs.joinToString("&") { (k, v) -> "${URLEncoder.encode(k, Charsets.UTF_8)}=${URLEncoder.encode(v, Charsets.UTF_8)}" }
+    /** A page as the browser ends up at it: where (after redirects), its status and its text. */
+    private class Page(val url: URI, val status: Int, val body: String)
+
+    /**
+     * A request as a browser makes it: the session's cookies sent, the ones each response sets kept,
+     * and redirects followed (as GETs, as browsers do after a POST).
+     */
+    private suspend fun send(url: URI, body: Body? = null): Page {
+        var at = url
+        var sending = body
+        repeat(MAX_REDIRECTS) {
+            val request = when (val b = sending) {
+                null -> session.get().uri(at)
+                is Body.Form -> session.post().uri(at).body(BodyInserters.fromFormData(LinkedMultiValueMap<String, String>().apply { b.fields.forEach { (k, v) -> add(k, v) } }))
+                is Body.Json -> session.post().uri(at).contentType(MediaType.APPLICATION_JSON).bodyValue(b.text)
+            }
+            val (page, next) = request
+                .header(HttpHeaders.USER_AGENT, USER_AGENT)
+                .headers { h -> cookies.get(at, emptyMap()).forEach { (k, v) -> h.addAll(k, v) } }
+                .awaitExchange { r ->
+                    val headers = r.headers().asHttpHeaders()
+                    cookies.put(at, mapOf(HttpHeaders.SET_COOKIE to headers.getOrEmpty(HttpHeaders.SET_COOKIE)))
+                    val location = headers.location.takeIf { r.statusCode().is3xxRedirection }
+                    if (location != null) { r.releaseBody().awaitSingleOrNull(); null to at.resolve(location) }
+                    else Page(at, r.statusCode().value(), r.awaitBodyOrNull<String>() ?: "") to null
+                }
+            if (page != null) return page
+            at = next!!
+            sending = null
+        }
+        throw PlmsException("PLMS: too many redirects from $url")
+    }
 
     companion object {
         /** An assignment page's instructions and attached files. */
@@ -221,6 +281,7 @@ class PlmsClient(
         }
 
         private const val PAGE = 50
+        private const val MAX_REDIRECTS = 10
         private const val USER_AGENT = "assistant-sync/1.0"
         private val LOGIN_TOKEN = Regex("""name="logintoken" value="([^"]+)"""")
         private val SESSKEY = Regex(""""sesskey":"([^"]+)"""")

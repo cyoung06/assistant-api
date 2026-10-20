@@ -2,6 +2,7 @@ package com.syeyoung.assistant.refs
 
 import com.syeyoung.assistant.common.ValidationException
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.config.OpenWeb
 import com.syeyoung.assistant.dav.Workspace
 import com.syeyoung.assistant.mail.MailRefs
 import com.syeyoung.assistant.source.plms.PlmsCatalog
@@ -10,21 +11,19 @@ import com.syeyoung.assistant.tasks.TaskRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.slf4j.LoggerFactory
+import org.springframework.core.io.buffer.DataBuffer
+import org.springframework.core.io.buffer.DataBufferUtils
+import reactor.core.publisher.Mono
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import java.net.InetAddress
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 
 /** Finds things to reference (@), names pasted links, and lists what references something. */
 @Service
@@ -38,13 +37,13 @@ class RefService(
     private val catalog: PlmsCatalog,
     private val taskRepo: TaskRepository,
     private val ws: Workspace,
+    private val web: OpenWeb,
     props: AppProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val base = props.publicUrl
     private val plmsBase = props.sources.plms.baseUrl
     private val plmsHost = URI(plmsBase).host
-    private val http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(5)).build()
 
     /** Everything matching [query], from every provider at once; mail gets a few seconds at most. */
     suspend fun search(query: String, limit: Int): List<Ref> = coroutineScope {
@@ -107,18 +106,17 @@ class RefService(
 
     suspend fun refreshCatalog(): Int = catalog.refresh()
 
-    /** A web page's og:title or <title>; private addresses aren't fetched. */
+    /** A web page's og:title or <title> (from its first 256 KB); only public addresses are fetched. */
     private suspend fun unfurl(uri: URI): String? = runCatching {
-        val addresses = InetAddress.getAllByName(uri.host)
-        if (addresses.any { it.isLoopbackAddress || it.isSiteLocalAddress || it.isLinkLocalAddress || it.isAnyLocalAddress || it.isMulticastAddress }) return null
-        val response = http.sendAsync(
-            HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(6)).header("User-Agent", "Mozilla/5.0 (assistant link preview)").GET().build(),
-            HttpResponse.BodyHandlers.ofInputStream(),
-        ).await()
-        if (response.statusCode() !in 200..299) return null
-        val head = response.body().use { it.readNBytes(256 * 1024) }.decodeToString()
-        titleOf(head)
-    }.getOrNull()
+        web.client.get().uri(uri).header("User-Agent", "Mozilla/5.0 (assistant link preview)")
+            .exchangeToMono { r ->
+                if (!r.statusCode().is2xxSuccessful) r.releaseBody().then(Mono.empty())
+                else DataBufferUtils.join(DataBufferUtils.takeUntilByteCount(r.bodyToFlux(DataBuffer::class.java), 256L * 1024))
+                    .map { buf -> try { buf.toString(Charsets.UTF_8) } finally { DataBufferUtils.release(buf) } }
+            }
+            .awaitSingleOrNull()
+            ?.let(::titleOf)
+    }.onFailure { log.debug("Link preview {}: {}", uri, it.toString()) }.getOrNull()
 
     private fun titleOf(html: String): String? {
         val og = Regex("""<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)

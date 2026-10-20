@@ -12,6 +12,15 @@ spring:
   webflux:
     problemdetails:
       enabled: true
+  # Every outbound client (WebClient.Builder) gets these; a client needing others says so where it's built.
+  http:
+    clients:
+      connect-timeout: 10s
+      read-timeout: 30s
+      redirects: follow
+  codec:
+    # Bodies read whole (JSON, calendars, pages): Codeforces' contest list alone is over a megabyte.
+    max-in-memory-size: 16MB
 
 app:
   zone: Asia/Seoul

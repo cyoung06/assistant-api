@@ -1,15 +1,10 @@
 package com.syeyoung.assistant.drive
 
+import com.syeyoung.assistant.common.servedSafely
 import com.syeyoung.assistant.config.AppProperties
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.reactor.awaitSingleOrNull
-import kotlinx.coroutines.withContext
 import org.springframework.http.HttpHeaders
 import org.springframework.web.bind.annotation.RequestHeader
-import java.nio.file.Files
 import org.springframework.core.io.buffer.DataBuffer
-import org.springframework.core.io.buffer.DataBufferUtils
-import org.springframework.core.io.buffer.DefaultDataBufferFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -74,21 +69,18 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         @RequestHeader(HttpHeaders.IF_NONE_MATCH, required = false) ifNoneMatch: String?,
     ): ResponseEntity<Flux<DataBuffer>> {
         requireEnabled()
+        // Streamed straight through from the drive.
         val r = dav.get(safe(path), range, ifNoneMatch?.let(::strong)) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        val type = r.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_OCTET_STREAM_VALUE)
-        val body = DataBufferUtils.readInputStream({ r.body() }, DefaultDataBufferFactory.sharedInstance, 64 * 1024)
-        return ResponseEntity.status(r.statusCode()).contentType(MediaType.parseMediaType(type))
-            .header("X-Content-Type-Options", "nosniff")
+        val type = r.headers.contentType ?: MediaType.APPLICATION_OCTET_STREAM
+        return ResponseEntity.status(r.statusCode).contentType(type)
+            .servedSafely(type.toString())
             .header(HttpHeaders.ACCEPT_RANGES, "bytes")
             .apply {
-                // Files are served from the app's own address: pages among them (HTML, SVG) run nothing there.
-                // (PDFs and media are left as they are, for the browser's viewers.)
-                if (!Regex("^(application/pdf|image/(?!svg)|video/|audio/)").containsMatchIn(type)) header("Content-Security-Policy", "sandbox")
                 for (h in listOf(HttpHeaders.CONTENT_LENGTH, HttpHeaders.CONTENT_RANGE, HttpHeaders.ETAG, HttpHeaders.LAST_MODIFIED)) {
-                    r.headers().firstValue(h).ifPresent { header(h, it) }
+                    r.headers.getFirst(h)?.let { header(h, it) }
                 }
             }
-            .body(body)
+            .body(r.body ?: Flux.empty())
     }
 
     /** A preview of a PDF (its first page as a JPEG, [width] pixels wide); [version] (its modified time) keys caching. */
@@ -103,33 +95,29 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
 
     /**
      * Writes a file (making its folder); the request body is the contents (may be empty). With
-     * If-Match (the ETag it was read at), only if it hasn't changed since: 412 otherwise. The new
-     * ETag comes back.
+     * If-Match (the ETag it was read at), only if it hasn't changed since; with `If-None-Match: *`,
+     * only if there's no file there yet: 412 otherwise. The new ETag comes back.
      */
     @PutMapping("/file")
     suspend fun writeFile(
         @RequestParam path: String,
         @RequestHeader(HttpHeaders.IF_MATCH, required = false) ifMatch: String?,
+        @RequestHeader(HttpHeaders.IF_NONE_MATCH, required = false) ifNoneMatch: String?,
         request: ServerHttpRequest,
     ): ResponseEntity<Unit> {
         requireEnabled()
+        if (ifNoneMatch != null && ifNoneMatch.trim() != "*") throw ResponseStatusException(HttpStatus.BAD_REQUEST, "If-None-Match on a write can only be *")
         val p = safe(path)
         if (p.isEmpty() || p.endsWith("/")) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "a file path is needed")
         if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
         dav.makeFolders(p.substringBeforeLast('/', ""))
-        // Through a temporary file, not memory (scans and videos can be large).
-        val tmp = withContext(Dispatchers.IO) { Files.createTempFile("upload", null) }
-        try {
-            DataBufferUtils.write(request.body, tmp).awaitSingleOrNull()
-            val etag = try {
-                withContext(Dispatchers.IO) { Files.newInputStream(tmp) }.use { dav.put(p, it, Files.size(tmp), request.headers.contentType?.toString(), ifMatch?.let(::strong)) }
-            } catch (e: WebDav.Changed) {
-                throw ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Changed since it was opened")
-            }
-            return ResponseEntity.noContent().apply { etag?.let { header(HttpHeaders.ETAG, it) } }.build()
-        } finally {
-            withContext(Dispatchers.IO) { Files.deleteIfExists(tmp) }
+        // Streamed straight to the drive (scans and videos can be large); its length, if the client said.
+        val etag = try {
+            dav.put(p, request.body, request.headers.contentLength.takeIf { it >= 0 }, request.headers.contentType?.toString(), ifMatch?.let(::strong), absent = ifNoneMatch != null)
+        } catch (e: WebDav.Changed) {
+            throw ResponseStatusException(HttpStatus.PRECONDITION_FAILED, if (ifNoneMatch != null) "There's a file there already" else "Changed since it was opened")
         }
+        return ResponseEntity.noContent().apply { etag?.let { header(HttpHeaders.ETAG, it) } }.build()
     }
 
     /** Makes a folder (and its parents). */

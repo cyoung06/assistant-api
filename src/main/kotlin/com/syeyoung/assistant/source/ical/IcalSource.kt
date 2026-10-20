@@ -11,12 +11,11 @@ import com.syeyoung.assistant.source.DataSource
 import com.syeyoung.assistant.source.SourceRecord
 import com.syeyoung.assistant.source.SourceSnapshot
 import com.syeyoung.assistant.source.SourceTag
-import kotlinx.coroutines.future.await
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBody
+import reactor.core.publisher.Mono
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
@@ -32,7 +31,7 @@ import java.time.format.DateTimeFormatter
  * Repeating events are expanded into one item per occurrence within the window.
  */
 @Component
-class IcalSource(props: AppProperties) : DataSource {
+class IcalSource(props: AppProperties, web: WebClient.Builder) : DataSource {
     private val config = props.sources.ical
     private val zone = props.zone
 
@@ -41,21 +40,19 @@ class IcalSource(props: AppProperties) : DataSource {
     override val enabled = config.subscriptions.any { it.url.isNotBlank() }
     override val interval: Duration = config.interval
 
-    private val http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(15)).build()
+    private val http = web.defaultHeader("User-Agent", "assistant-sync/1.0").build()
 
     override suspend fun fetch(now: Instant): SourceSnapshot {
         val today = now.atZone(zone).toLocalDate()
         val from = today.minus(config.lookback)
         val to = today.plus(config.lookahead)
         val records = config.subscriptions.filter { it.url.isNotBlank() }.flatMap { sub ->
-            val response = http.sendAsync(
-                HttpRequest.newBuilder(URI(sub.url)).timeout(Duration.ofSeconds(30)).header("User-Agent", "assistant-sync/1.0").GET().build(),
-                HttpResponse.BodyHandlers.ofString(),
-            ).await()
-            if (response.statusCode() != 200) throw IllegalStateException("${sub.name}: feed returned HTTP ${response.statusCode()}")
+            val feed = http.get().uri(URI(sub.url)).retrieve()
+                .onStatus({ !it.is2xxSuccessful }) { r -> Mono.error(IllegalStateException("${sub.name}: feed returned HTTP ${r.statusCode().value()}")) }
+                .awaitBody<String>()
             val tag = SourceTag("ical:${sub.key}", sub.tag)
             val calendar = SourceTag("ical:${sub.key}", sub.name)
-            IcalParser.parse(response.body(), zone).flatMap { toRecords(sub.key, it, tag, from, to, zone).map { r -> r.copy(calendar = calendar) } }
+            IcalParser.parse(feed, zone).flatMap { toRecords(sub.key, it, tag, from, to, zone).map { r -> r.copy(calendar = calendar) } }
         }
         return SourceSnapshot(records, deleteMissing = true)
     }

@@ -1,16 +1,14 @@
 package com.syeyoung.assistant.mail
 
 import com.syeyoung.assistant.config.AppProperties
-import kotlinx.coroutines.future.await
 import org.springframework.stereotype.Component
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.web.reactive.function.BodyInserters
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBody
+import org.springframework.web.reactive.function.client.awaitExchange
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
-import java.net.URI
-import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 import java.util.Base64
 
 data class DeviceCode(val deviceCode: String, val userCode: String, val verificationUri: String, val expiresIn: Long, val interval: Long)
@@ -32,9 +30,9 @@ class OAuthException(val error: String, message: String) : RuntimeException(mess
  * the user signs in on another device with a short code, so this server needs no redirect URL.
  */
 @Component
-class MicrosoftOAuth(props: AppProperties, private val mapper: ObjectMapper) {
+class MicrosoftOAuth(props: AppProperties, private val mapper: ObjectMapper, web: WebClient.Builder) {
     private val config = props.sources.mail
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
+    private val http = web.build()
     private val base get() = "${config.authority.trimEnd('/')}/${config.tenant}/oauth2/v2.0"
 
     suspend fun startDeviceFlow(): DeviceCode {
@@ -85,17 +83,12 @@ class MicrosoftOAuth(props: AppProperties, private val mapper: ObjectMapper) {
         listOf("preferred_username", "email", "upn").firstNotNullOfOrNull { claims.path(it).asString(null)?.takeIf(String::isNotBlank) }
     }.getOrNull()
 
-    private suspend fun post(url: String, form: Map<String, String>): JsonNode {
-        val body = form.entries.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, Charsets.UTF_8)}" }
-        val response = http.sendAsync(
-            HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(30))
-                .header("Content-Type", "application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(body)).build(),
-            HttpResponse.BodyHandlers.ofString(),
-        ).await()
-        return runCatching { mapper.readTree(response.body()) }.getOrElse {
-            throw OAuthException("bad_response", "Microsoft sign-in answered HTTP ${response.statusCode()}")
-        }
-    }
+    /** A form POST; errors come back as JSON too (with a 4xx), so the body is read whatever the status. */
+    private suspend fun post(url: String, form: Map<String, String>): JsonNode =
+        http.post().uri(url).body(BodyInserters.fromFormData(LinkedMultiValueMap<String, String>().apply { form.forEach { (k, v) -> add(k, v) } }))
+            .awaitExchange { r ->
+                runCatching { r.awaitBody<JsonNode>() }.getOrElse { throw OAuthException("bad_response", "Microsoft sign-in answered HTTP ${r.statusCode().value()}") }
+            }
 
     companion object {
         /** IMAP on Exchange Online, a refresh token, and the ID token that names the mailbox. */

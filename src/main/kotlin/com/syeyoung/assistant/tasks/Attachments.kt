@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import com.syeyoung.assistant.common.servedSafely
 import java.nio.ByteBuffer
 import java.time.Clock
 import java.time.Duration
@@ -120,7 +121,7 @@ class AttachmentController(private val repo: AttachmentRepository, private val c
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType(a.info.contentType))
             .cacheControl(CacheControl.maxAge(Duration.ofDays(30)).cachePrivate())
-            .header("Content-Disposition", "inline; filename*=UTF-8''" + java.net.URLEncoder.encode(a.info.filename, Charsets.UTF_8).replace("+", "%20"))
+            .servedSafely(a.info.contentType, a.info.filename)
             .body(a.bytes)
     }
 

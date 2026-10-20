@@ -6,7 +6,6 @@ import com.syeyoung.assistant.common.ValidationException
 import com.syeyoung.assistant.common.opt
 import com.syeyoung.assistant.common.req
 import com.syeyoung.assistant.config.AppProperties
-import kotlinx.coroutines.future.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
@@ -17,6 +16,12 @@ import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.awaitRowsUpdated
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.web.reactive.function.BodyInserters
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBody
+import org.springframework.web.reactive.function.client.awaitExchange
+import org.springframework.web.util.UriComponentsBuilder
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -26,12 +31,7 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
-import java.net.URI
 import java.net.URLDecoder
-import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Clock
@@ -59,9 +59,9 @@ class ChatGptAuthException(val error: String, message: String) : RuntimeExceptio
  * user pastes that address back; the code in it is exchanged here, with the PKCE verifier.
  */
 @Component
-class ChatGptOAuth(props: AppProperties, private val mapper: ObjectMapper, private val clock: Clock) {
+class ChatGptOAuth(props: AppProperties, private val mapper: ObjectMapper, private val clock: Clock, web: WebClient.Builder) {
     private val config = props.llm
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build()
+    private val http = web.baseUrl(config.issuer.trimEnd('/')).build()
 
     fun authorizeUrl(state: String, verifier: String): String {
         val params = mapOf(
@@ -76,7 +76,8 @@ class ChatGptOAuth(props: AppProperties, private val mapper: ObjectMapper, priva
             "codex_cli_simplified_flow" to "true",
             "originator" to "codex_cli_rs",
         )
-        return "${config.issuer.trimEnd('/')}/oauth/authorize?" + form(params)
+        return UriComponentsBuilder.fromUriString("${config.issuer.trimEnd('/')}/oauth/authorize")
+            .apply { params.forEach { (k, v) -> queryParam(k, v) } }.encode().build().toUriString()
     }
 
     suspend fun exchange(code: String, verifier: String): ChatGptTokens = tokens(
@@ -109,24 +110,18 @@ class ChatGptOAuth(props: AppProperties, private val mapper: ObjectMapper, priva
         mapper.readTree(Base64.getUrlDecoder().decode(jwt.split('.')[1]))
     }.getOrNull()
 
-    private suspend fun post(params: Map<String, String>): JsonNode {
-        val response = http.sendAsync(
-            HttpRequest.newBuilder(URI("${config.issuer.trimEnd('/')}/oauth/token")).timeout(Duration.ofSeconds(30))
-                .header("Content-Type", "application/x-www-form-urlencoded").POST(HttpRequest.BodyPublishers.ofString(form(params))).build(),
-            HttpResponse.BodyHandlers.ofString(),
-        ).await()
-        val json = runCatching { mapper.readTree(response.body()) }.getOrElse {
-            throw ChatGptAuthException("bad_response", "OpenAI sign-in answered HTTP ${response.statusCode()}")
-        }
-        if (response.statusCode() !in 200..299) {
-            val error = json.path("error").let { if (it.isObject) it.path("code").asString("error") else it.asString("error") }
-            val message = json.path("error_description").asString(null) ?: json.path("error").path("message").asString(null) ?: "HTTP ${response.statusCode()}"
-            throw ChatGptAuthException(error, message)
-        }
-        return json
-    }
-
-    private fun form(params: Map<String, String>) = params.entries.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, Charsets.UTF_8)}" }
+    private suspend fun post(params: Map<String, String>): JsonNode =
+        http.post().uri("/oauth/token").body(BodyInserters.fromFormData(LinkedMultiValueMap<String, String>().apply { params.forEach { (k, v) -> add(k, v) } }))
+            .awaitExchange { r ->
+                val status = r.statusCode()
+                val json = runCatching { r.awaitBody<JsonNode>() }.getOrElse { throw ChatGptAuthException("bad_response", "OpenAI sign-in answered HTTP ${status.value()}") }
+                if (!status.is2xxSuccessful) {
+                    val error = json.path("error").let { if (it.isObject) it.path("code").asString("error") else it.asString("error") }
+                    val message = json.path("error_description").asString(null) ?: json.path("error").path("message").asString(null) ?: "HTTP ${status.value()}"
+                    throw ChatGptAuthException(error, message)
+                }
+                json
+            }
 
     companion object {
         const val REDIRECT_URI = "http://localhost:1455/auth/callback"

@@ -19,6 +19,7 @@ import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitRowsUpdated
 import org.springframework.r2dbc.core.flow
 import org.springframework.stereotype.Component
+import reactor.core.publisher.Flux
 import tools.jackson.databind.JsonNode
 import java.time.Clock
 import java.time.Instant
@@ -94,10 +95,19 @@ class PlmsFiles(
                     continue
                 }
                 val name = if (previous == null) file.name else updatedName(file.name, Instant.ofEpochSecond(file.modified))
-                val path = free(folder + file.subfolder + name, taken).also { taken += it }
+                var path = free(folder + file.subfolder + name, taken).also { taken += it }
                 try {
                     dav.makeFolders(path.substringBeforeLast('/'))
-                    plms.client.download(file.url).let { r -> r.body().use { dav.put(path, it, file.size.takeIf { s -> s > 0 }, file.mime) } }
+                    // Never over a file that's there (the listing above is of the top folder only): the next free name instead.
+                    while (true) {
+                        val r = plms.client.download(file.url)
+                        try {
+                            dav.put(path, r.body ?: Flux.empty(), r.headers.contentLength.takeIf { it >= 0 }, file.mime, absent = true)
+                            break
+                        } catch (e: WebDav.Changed) {
+                            path = free(path, taken).also { taken += it }
+                        }
+                    }
                     record(file, path)
                     copied++
                     log.info("PLMS file copied: {}", path)

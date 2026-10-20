@@ -6,13 +6,11 @@ import com.syeyoung.assistant.source.SourceRecord
 import com.syeyoung.assistant.source.SourceSnapshot
 import com.syeyoung.assistant.source.SourceTag
 import com.syeyoung.assistant.source.SourceType
-import kotlinx.coroutines.future.await
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBody
 import tools.jackson.databind.ObjectMapper
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -24,7 +22,7 @@ import java.time.format.DateTimeFormatter
  * calendar; a rescheduled one moves.
  */
 @Component
-class ContestSource(props: AppProperties, private val mapper: ObjectMapper) : DataSource {
+class ContestSource(props: AppProperties, private val mapper: ObjectMapper, web: WebClient.Builder) : DataSource {
     private val config = props.sources.contests
 
     override val type = SourceType.CONTESTS
@@ -32,7 +30,7 @@ class ContestSource(props: AppProperties, private val mapper: ObjectMapper) : Da
     override val enabled = config.enabled
     override val interval: Duration = config.interval
 
-    private val http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(Duration.ofSeconds(15)).build()
+    private val http = web.defaultHeader("User-Agent", "Mozilla/5.0 (assistant contest calendar)").build()
 
     override suspend fun fetch(now: Instant): SourceSnapshot {
         val codeforces = runCatching { codeforces(get("https://codeforces.com/api/contest.list?gym=false"), config.codeforces) }
@@ -71,14 +69,7 @@ class ContestSource(props: AppProperties, private val mapper: ObjectMapper) : Da
         tags = listOf(SourceTag(site.lowercase(), site)), calendar = SourceTag("contests", "Contests"),
     )
 
-    private suspend fun get(url: String): String {
-        val res = http.sendAsync(
-            HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(30)).header("User-Agent", "Mozilla/5.0 (assistant contest calendar)").GET().build(),
-            HttpResponse.BodyHandlers.ofString(),
-        ).await()
-        check(res.statusCode() in 200..299) { "$url answered HTTP ${res.statusCode()}" }
-        return res.body()
-    }
+    private suspend fun get(url: String): String = http.get().uri(URI(url)).retrieve().awaitBody()
 
     companion object {
         private val ROW = Regex("""(?s)<tr>(.*?)</tr>""")

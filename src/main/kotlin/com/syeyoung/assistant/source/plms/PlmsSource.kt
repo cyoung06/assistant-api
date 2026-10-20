@@ -6,10 +6,17 @@ import com.syeyoung.assistant.source.DataSource
 import com.syeyoung.assistant.source.SourceRecord
 import com.syeyoung.assistant.source.SourceSnapshot
 import com.syeyoung.assistant.source.SourceTag
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.boot.http.client.HttpClientSettings
+import org.springframework.boot.http.client.HttpRedirects
+import org.springframework.boot.http.client.reactive.ClientHttpConnectorBuilder
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
+import org.springframework.r2dbc.core.awaitOneOrNull
+import org.springframework.r2dbc.core.awaitRowsUpdated
 import org.springframework.r2dbc.core.flow
 import java.time.Duration
 import java.time.Instant
@@ -22,7 +29,14 @@ import java.time.ZoneId
  * something is submitted it leaves the to-do list, and the task is marked done.
  */
 @Component
-class PlmsSource(private val props: AppProperties, private val mapper: ObjectMapper, private val db: org.springframework.r2dbc.core.DatabaseClient) : DataSource {
+class PlmsSource(
+    private val props: AppProperties,
+    private val mapper: ObjectMapper,
+    private val db: org.springframework.r2dbc.core.DatabaseClient,
+    private val web: ObjectProvider<WebClient.Builder>,
+    private val connectors: ClientHttpConnectorBuilder<*>,
+    private val settings: HttpClientSettings,
+) : DataSource {
     private val config = props.sources.plms
     private val log = org.slf4j.LoggerFactory.getLogger(javaClass)
     private val zone = props.zone
@@ -32,7 +46,28 @@ class PlmsSource(private val props: AppProperties, private val mapper: ObjectMap
     override val enabled = config.enabled && config.username.isNotBlank() && config.password.isNotBlank()
     override val interval: Duration = config.interval
 
-    val client by lazy { PlmsClient(config.baseUrl.trimEnd('/'), config.username, config.password, mapper) }
+    val client by lazy {
+        PlmsClient(
+            config.baseUrl.trimEnd('/'), config.username, config.password, mapper, loginFailures,
+            session = web.getObject().clientConnector(connectors.build(settings.withRedirects(HttpRedirects.DONT_FOLLOW))).build(),
+            files = web.getObject().build(),
+        )
+    }
+
+    /** The last failed login, as "<epoch millis> <credentials hash>" in settings. */
+    private val loginFailures = object : PlmsClient.LoginFailures {
+        override suspend fun last() = db.sql("select value from settings where key = 'plms.login_failed'").map { r -> r.get("value", String::class.java)!! }
+            .awaitOneOrNull()?.split(' ', limit = 2)?.takeIf { it.size == 2 }?.let { (at, with) -> Instant.ofEpochMilli(at.toLong()) to with }
+
+        override suspend fun failed(at: Instant, credentials: String) {
+            db.sql("insert into settings (key, value) values ('plms.login_failed', :v) on conflict (key) do update set value = :v")
+                .bind("v", "${at.toEpochMilli()} $credentials").fetch().awaitRowsUpdated()
+        }
+
+        override suspend fun cleared() {
+            db.sql("delete from settings where key = 'plms.login_failed'").fetch().awaitRowsUpdated()
+        }
+    }
 
     override suspend fun fetch(now: Instant): SourceSnapshot {
         val from = now.minus(config.lookback)

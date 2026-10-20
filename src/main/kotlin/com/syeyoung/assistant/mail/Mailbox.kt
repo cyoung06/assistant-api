@@ -156,6 +156,8 @@ class ImapMailbox(props: AppProperties) : Mailbox {
             val now = mutableMapOf<String, FolderMark>()
             val folders = store.defaultFolder.list("*").filterIsInstance<IMAPFolder>().filter { watched(it) }
             for (f in folders) {
+                // Full: the folders not reached keep their marks (or, without one, are read from [since] next time).
+                if (mail.size >= limit) break
                 f.open(Folder.READ_ONLY)
                 try {
                     val validity = f.uidValidity
@@ -173,7 +175,8 @@ class ImapMailbox(props: AppProperties) : Mailbox {
                     }
                     // A folder read to the end is marked up to its newest mail (older ones before [since] stay unread).
                     if (complete && mark == null) last = maxOf(last, f.uidNext - 1)
-                    now[f.fullName] = FolderMark(validity, last)
+                    // (One without a mark that nothing was read from yet stays without: a mark of 0 would read its whole history.)
+                    if (mark != null || last > 0) now[f.fullName] = FolderMark(validity, last)
                 } finally {
                     f.close(false)
                 }

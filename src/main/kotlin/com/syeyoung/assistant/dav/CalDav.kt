@@ -1,17 +1,15 @@
 package com.syeyoung.assistant.dav
 
 import com.syeyoung.assistant.config.AppProperties
-import kotlinx.coroutines.future.await
+import org.springframework.http.HttpMethod
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.awaitBodyOrNull
+import org.springframework.web.reactive.function.client.awaitExchange
 import org.w3c.dom.Element
 import java.io.StringReader
 import java.net.URI
 import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
-import java.util.Base64
 import javax.xml.parsers.DocumentBuilderFactory
 import org.xml.sax.InputSource
 
@@ -44,12 +42,14 @@ interface CalDav {
 
 /** CalDAV over HTTP with basic auth, against one user's home on the server. */
 @Component
-class HttpCalDav(props: AppProperties) : CalDav {
+class HttpCalDav(props: AppProperties, web: WebClient.Builder) : CalDav {
     private val config = props.dav
     private val base = config.url.trimEnd('/')
     private val home = "/${config.username}/"
-    private val auth = "Basic " + Base64.getEncoder().encodeToString("${config.username}:${config.password}".toByteArray())
-    private val http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(10)).build()
+    private val http = web.defaultHeaders { it.setBasicAuth(config.username, config.password) }.build()
+
+    /** A response read whole: its status, ETag and body. */
+    private class Response(val status: Int, val etag: String?, val body: String)
 
     override suspend fun collections(): List<DavCollection> {
         val body = """<?xml version="1.0" encoding="utf-8"?>
@@ -106,60 +106,40 @@ class HttpCalDav(props: AppProperties) : CalDav {
 
     override suspend fun get(href: String): DavObject? {
         val response = request("GET", href, null, emptyMap())
-        if (response.statusCode() == 404) return null
-        check(response.statusCode() == 200) { "GET $href: HTTP ${response.statusCode()}" }
-        return DavObject(href, response.headers().firstValue("ETag").orElse(null), response.body())
+        if (response.status == 404) return null
+        check(response.status == 200) { "GET $href: HTTP ${response.status}" }
+        return DavObject(href, response.etag, response.body)
     }
 
     override suspend fun put(href: String, data: String, etag: String?): String? {
         val headers = mapOf("Content-Type" to "text/calendar; charset=utf-8") + (if (etag == null) mapOf("If-None-Match" to "*") else mapOf("If-Match" to etag))
-        val (response, retried) = requestWithRetry("PUT", href, data, headers)
-        // A retried create can find its own first attempt already stored.
-        if (response.statusCode() == 412 && retried && etag == null && get(href)?.data?.let(::sameUid)?.invoke(data) == true) return null
-        if (response.statusCode() == 412) throw DavConflictException(href)
-        check(response.statusCode() in 200..299) { "PUT $href: HTTP ${response.statusCode()} ${response.body().take(200)}" }
-        return response.headers().firstValue("ETag").orElse(null)
+        val response = request("PUT", href, data, headers)
+        if (response.status == 412) throw DavConflictException(href)
+        check(response.status in 200..299) { "PUT $href: HTTP ${response.status} ${response.body.take(200)}" }
+        return response.etag
     }
 
     override suspend fun delete(href: String, etag: String?) {
         val response = request("DELETE", href, null, etag?.let { mapOf("If-Match" to it) } ?: emptyMap())
-        if (response.statusCode() == 412) throw DavConflictException(href)
-        check(response.statusCode() in 200..299 || response.statusCode() == 404) { "DELETE $href: HTTP ${response.statusCode()}" }
+        if (response.status == 412) throw DavConflictException(href)
+        check(response.status in 200..299 || response.status == 404) { "DELETE $href: HTTP ${response.status}" }
     }
 
     private suspend fun send(method: String, href: String, body: String?, headers: Map<String, String>, expect: Set<Int>): String {
         val response = request(method, href, body, headers + ("Content-Type" to "application/xml; charset=utf-8"))
-        check(response.statusCode() in expect) { "$method $href: HTTP ${response.statusCode()} ${response.body().take(200)}" }
-        return response.body()
+        check(response.status in expect) { "$method $href: HTTP ${response.status} ${response.body.take(200)}" }
+        return response.body
     }
 
     /**
-     * Sends the request, retrying once when the connection fails before a response arrives: the server
-     * closes idle keep-alive connections, and the client may pick one that was just closed.
+     * [href] is a path as the server gives it (already encoded), so it's used as is. (A pooled
+     * connection the server closed meanwhile is retried by the client itself, before anything is sent.)
      */
-    private suspend fun requestWithRetry(method: String, href: String, body: String?, headers: Map<String, String>): Pair<HttpResponse<String>, Boolean> =
-        try {
-            sendOnce(method, href, body, headers) to false
-        } catch (e: java.io.IOException) {
-            sendOnce(method, href, body, headers) to true
-        }
-
-    private suspend fun request(method: String, href: String, body: String?, headers: Map<String, String>): HttpResponse<String> =
-        requestWithRetry(method, href, body, headers).first
-
-    private fun sameUid(stored: String): (String) -> Boolean = { sent ->
-        val uid = { text: String -> Regex("(?m)^UID:(.*)$").find(text.replace("\r", ""))?.groupValues?.get(1)?.trim() }
-        uid(stored) != null && uid(stored) == uid(sent)
-    }
-
-    private suspend fun sendOnce(method: String, href: String, body: String?, headers: Map<String, String>): HttpResponse<String> {
-        val builder = HttpRequest.newBuilder(URI(base + href))
-            .timeout(Duration.ofSeconds(30))
-            .header("Authorization", auth)
-            .method(method, body?.let { HttpRequest.BodyPublishers.ofString(it) } ?: HttpRequest.BodyPublishers.noBody())
-        headers.forEach { (k, v) -> builder.header(k, v) }
-        return http.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString()).await()
-    }
+    private suspend fun request(method: String, href: String, body: String?, headers: Map<String, String>): Response =
+        http.method(HttpMethod.valueOf(method)).uri(URI(base + href))
+            .headers { h -> headers.forEach { (k, v) -> h.set(k, v) } }
+            .apply { if (body != null) bodyValue(body) }
+            .awaitExchange { r -> Response(r.statusCode().value(), r.headers().asHttpHeaders().eTag, r.awaitBodyOrNull<String>() ?: "") }
 
     private fun responses(xml: String): List<Element> {
         val factory = DocumentBuilderFactory.newInstance().apply {
