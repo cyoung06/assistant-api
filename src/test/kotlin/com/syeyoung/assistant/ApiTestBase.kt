@@ -74,7 +74,6 @@ abstract class ApiTestBase {
             registry.add("app.dav.url") { TestRadicale.url }
             registry.add("app.dav.username") { "tester" }
             registry.add("app.dav.password") { "x" }
-            registry.add("app.public-host") { "assistant.public.test" }
             registry.add("app.sources.mail.client-id") { "test-client" }
             registry.add("app.sources.mail.authority") { TestMail.oauthUrl }
             registry.add("app.sources.mail.imap-host") { "127.0.0.1" }

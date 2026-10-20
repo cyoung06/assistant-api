@@ -9,11 +9,6 @@ data class AppProperties(
     val zone: ZoneId = ZoneId.of("Asia/Seoul"),
     /** Where the web app is reached; links to the app's own things (tasks, events, mail) start with it. */
     val publicUrl: String = "http://localhost:5173",
-    /**
-     * The internet-facing host (for the Outlook add-in). Requests arriving through it may only use
-     * paths under /api/v1/public/; empty means there is none.
-     */
-    val publicHost: String = "",
     val sources: Sources = Sources(),
     val llm: Llm = Llm(),
     val github: Github = Github(),

@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.toList
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
+import org.springframework.http.server.PathContainer
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.awaitRowsUpdated
@@ -54,24 +55,25 @@ class UnauthorizedException : ApiException(HttpStatus.UNAUTHORIZED, "unauthorize
 class TooManyRequestsException : ApiException(HttpStatus.TOO_MANY_REQUESTS, "rate_limited", "Too many requests; try again in a minute")
 
 /**
- * Through the public host only paths under /api/v1/public/ are reachable: everything else answers 404 there,
- * whatever the ingress in front lets through.
+ * A request from the internet (the public ingress's nginx marks each one, replacing anything the
+ * client sent) reaches nothing but /api/v1/public/: everything else answers 404, whatever's in front.
+ * (A marker forged on the tailnet only takes reach away.)
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-class PublicHostFilter(props: AppProperties) : WebFilter {
-    private val host = props.publicHost.lowercase()
-
+class PublicEntryFilter : WebFilter {
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
-        if (host.isEmpty()) return chain.filter(exchange)
-        val headers = exchange.request.headers
-        val requestHost = (headers.getFirst("X-Forwarded-Host") ?: headers.host?.hostString ?: "").substringBefore(':').lowercase()
-        val path = exchange.request.path.value()
-        if (requestHost == host && !path.startsWith("/api/v1/public/")) {
-            exchange.response.statusCode = HttpStatus.NOT_FOUND
-            return exchange.response.setComplete()
-        }
-        return chain.filter(exchange)
+        val request = exchange.request
+        if (request.headers.getFirst(ENTRY) != "public") return chain.filter(exchange)
+        val segments = request.path.pathWithinApplication().elements().filterIsInstance<PathContainer.PathSegment>().map { it.valueToMatch() }
+        val public = segments.take(3) == listOf("api", "v1", "public") && segments.none { it == "." || it == ".." }
+        if (public) return chain.filter(exchange)
+        exchange.response.statusCode = HttpStatus.NOT_FOUND
+        return exchange.response.setComplete()
+    }
+
+    companion object {
+        const val ENTRY = "X-Assistant-Entry"
     }
 }
 
