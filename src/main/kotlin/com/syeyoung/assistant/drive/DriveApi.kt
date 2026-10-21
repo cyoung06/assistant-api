@@ -2,6 +2,7 @@ package com.syeyoung.assistant.drive
 
 import com.syeyoung.assistant.common.servedSafely
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.sync.SyncDocs
 import org.springframework.http.HttpHeaders
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.core.io.buffer.DataBuffer
@@ -37,7 +38,7 @@ private const val READ_ONLY = "Course files are kept as PLMS has them; copy one 
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties) {
+class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs) {
 
     @GetMapping
     fun driveInfo() = DriveInfo(drive.enabled, props.drive.publicUrl, props.drive.username)
@@ -117,6 +118,8 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         } catch (e: WebDav.Changed) {
             throw ResponseStatusException(HttpStatus.PRECONDITION_FAILED, if (ifNoneMatch != null) "There's a file there already" else "Changed since it was opened")
         }
+        // A note open live: the devices on it see this write now.
+        live.written(p)
         return ResponseEntity.noContent().apply { etag?.let { header(HttpHeaders.ETAG, it) } }.build()
     }
 
@@ -135,11 +138,14 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         val source = editable(from)
         val target = editable(to, folder = dav.isFolder(source))
         dav.makeFolders(target.substringBeforeLast('/', ""))
+        // Notes open there are written first, and their devices let go.
+        live.release(source)
         try {
             dav.move(source, target)
         } catch (e: IllegalStateException) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Something is already called that")
         }
+        live.moved(source, target)
         return ResponseEntity.noContent().build()
     }
 
@@ -158,6 +164,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         val (stem, ext) = if (dot < 0) target to "" else target.substring(0, dot) to target.substring(dot)
         var n = 2
         while (dav.exists(target)) target = "$stem (${n++})$ext"
+        live.flush(source)
         dav.copy(source, target)
         return DriveCopied(target)
     }
@@ -166,7 +173,10 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
     @DeleteMapping("/file")
     suspend fun deleteFile(@RequestParam path: String): ResponseEntity<Unit> {
         requireEnabled()
-        dav.delete(editable(path))
+        val p = editable(path)
+        live.release(p)
+        dav.delete(p)
+        live.moved(p, null)
         return ResponseEntity.noContent().build()
     }
 

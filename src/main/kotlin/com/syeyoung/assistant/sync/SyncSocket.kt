@@ -29,7 +29,11 @@ class SyncSocket(private val docs: SyncDocs) : WebSocketHandler {
 
         // Messages to this device, from any thread (others' edits arrive on theirs): one at a time.
         val out = Sinks.many().unicast().onBackpressureBuffer<ByteArray>()
-        val peer = SyncDocs.Peer { message -> synchronized(out) { out.tryEmitNext(message) } }
+        val peer = object : SyncDocs.Peer {
+            override fun send(message: ByteArray) = synchronized(out) { out.tryEmitNext(message); Unit }
+            // The note moved or was deleted: the device is told so, and doesn't come back to it.
+            override fun close() = session.close(CloseStatus.POLICY_VIOLATION.withReason("moved or deleted")).subscribe().let { }
+        }
 
         return mono { docs.join(path, peer) }
             .switchIfEmpty(Mono.defer { session.close(CloseStatus.POLICY_VIOLATION.withReason("no such note")).then(Mono.empty()) })

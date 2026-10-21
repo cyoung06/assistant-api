@@ -40,14 +40,18 @@ import java.util.concurrent.CopyOnWriteArraySet
  */
 @Component
 class SyncDocs(private val dav: WebDav, private val props: AppProperties, private val db: DatabaseClient, private val clock: Clock) {
+    /** How long after the last edit a note is written. */
+    internal var settle = 1000L
+
     private val log = LoggerFactory.getLogger(javaClass)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val rooms = ConcurrentHashMap<String, Room>()
     private val opening = ConcurrentHashMap<String, Mutex>()
 
-    /** A device on a note: how to send it a message. */
+    /** A device on a note: how to send it a message, and to let it go (the note moved or was deleted). */
     fun interface Peer {
         fun send(message: ByteArray)
+        fun close() {}
     }
 
     /** An open note: its document and the devices on it. */
@@ -91,6 +95,53 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
         if (got.changes.isNotEmpty()) later(room)
     }
 
+    /**
+     * Before what's at [path] (a note, or a folder with notes in it) is moved or deleted: its open
+     * notes are written now, and their devices let go (writing on would make the old file again).
+     */
+    suspend fun release(path: String) {
+        for (room in rooms.values.filter { under(it.path, path) }) {
+            room.save?.cancel()
+            save(room)
+            rooms.remove(room.path, room)
+            room.peers.forEach { it.close() }
+        }
+    }
+
+    /** After [from] was moved to [to] (null: deleted): what's kept of its notes follows. */
+    suspend fun moved(from: String, to: String?) {
+        if (to == null) {
+            db.sql("delete from sync_docs where path = :p or path like :under").bind("p", from).bind("under", like(from)).fetch().awaitRowsUpdated()
+        } else {
+            db.sql("update sync_docs set path = :to || substr(path, length(:from) + 1) where path = :from or path like :under")
+                .bind("to", to).bind("from", from).bind("under", like(from)).fetch().awaitRowsUpdated()
+        }
+    }
+
+    /** Before what's at [path] is copied: its open notes written, so the copy has what's typed. */
+    suspend fun flush(path: String) {
+        for (room in rooms.values.filter { under(it.path, path) }) {
+            room.save?.cancel()
+            save(room)
+        }
+    }
+
+    /** The note at [path] was written through the drive (not live): if it's open, that's merged in now. */
+    suspend fun written(path: String) {
+        val room = rooms[path] ?: return
+        room.lock.withLock {
+            val file = read(path) ?: return
+            if (file.second == room.etag) return
+            room.base = merge(room, file.first)
+            room.etag = file.second
+            store(path, room.doc.state(), room.base, room.etag)
+            if (room.doc.text() != file.first) later(room)
+        }
+    }
+
+    private fun under(note: String, path: String) = note == path || note.startsWith(path.trimEnd('/') + "/")
+    private fun like(folder: String) = folder.trimEnd('/').replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"
+
     private suspend fun open(path: String): Room? {
         val file = read(path)
         val row = db.sql("select state, base_state, file_etag from sync_docs where path = :path").bind("path", path)
@@ -111,31 +162,37 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
         val room = Room(path, withContext(Dispatchers.Default) { SyncDoc.fromState(state) }, etag, base)
         // Changed elsewhere while no one had it open.
         if (file.second != etag) {
-            merge(room, file.first)
+            room.base = merge(room, file.first)
             room.etag = file.second
-            room.base = room.doc.state()
-            store(path, room.base, room.base, room.etag)
+            store(path, room.doc.state(), room.base, room.etag)
+            // Opened with the file's change in it: written as merged (it may hold edits the file hasn't).
+            if (room.doc.text() != file.first) later(room)
         }
         return room
     }
 
-    /** The file's text changed elsewhere to [text]: that change, made to the document as it was when the file last matched, merged in. */
-    private suspend fun merge(room: Room, text: String) = withContext(Dispatchers.Default) {
+    /**
+     * The file's text changed elsewhere to [text]: that change, made to the document as it was when
+     * the file last matched, merged in. Returns that document with the change (its text is the
+     * file's), the new base for the next change made elsewhere.
+     */
+    private suspend fun merge(room: Room, text: String): ByteArray = withContext(Dispatchers.Default) {
         val fork = SyncDoc.fromState(room.base)
         val before = fork.text()
-        if (before == text) return@withContext
-        val (from, to, insert) = difference(before, text)
-        val edit = fork.edit(from.toUInt(), to.toUInt(), insert)
-        val got = room.doc.receive(edit)
-        got.broadcast?.let { out -> room.peers.forEach { it.send(out) } }
-        log.info("{}: changed elsewhere, merged in", room.path)
+        if (before != text) {
+            val (from, to, insert) = difference(before, text)
+            val got = room.doc.receive(fork.edit(from.toUInt(), to.toUInt(), insert))
+            got.broadcast?.let { out -> room.peers.forEach { it.send(out) } }
+            log.info("{}: changed elsewhere, merged in", room.path)
+        }
+        fork.state()
     }
 
     private fun later(room: Room) {
         room.dirty = true
         room.save?.cancel()
         room.save = scope.launch {
-            delay(SETTLE)
+            delay(settle)
             save(room)
         }
     }
@@ -158,9 +215,8 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
                         return
                     } catch (e: WebDav.Changed) {
                         val file = read(room.path) ?: run { log.info("{}: deleted elsewhere; not written", room.path); forget(room.path); return }
-                        merge(room, file.first)
+                        room.base = merge(room, file.first)
                         room.etag = file.second
-                        room.base = room.doc.state()
                     }
                 }
                 error("it kept changing elsewhere")
@@ -203,8 +259,6 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
     }
 
     companion object {
-        /** How long after the last edit a note is written. */
-        private const val SETTLE = 1000L
         /** y-protocols' awareness message type. */
         private const val MESSAGE_AWARENESS: Byte = 1
 

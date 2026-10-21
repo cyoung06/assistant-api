@@ -166,6 +166,54 @@ class SyncLiveTest {
     }
 
     @Test
+    fun `writes through the drive reach the devices, and don't undo what they type meanwhile`() = runBlocking {
+        // What the device types stays unwritten while the file is written elsewhere.
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC()).apply { settle = 15_000 }
+        dav.makeFolders(scratch)
+        val note = scratch + "written.md"
+        write(note, "a\n")
+        val dev = Device(docs)
+        dev.join(note)
+
+        // The device types; before that's written, the file is written twice elsewhere (an app without live editing).
+        dev.type(2, 2, "typed\n")
+        write(note, "a\nb\n", ifMatch = dav.etag(note))
+        docs.written(note)
+        write(note, "a\nb\nc\n", ifMatch = dav.etag(note))
+        docs.written(note)
+        dev.drain()
+        // Nothing lost (the two inserted at the same place at once go in an order of Yjs' choosing, the same everywhere).
+        assertEquals(listOf("a", "b", "c", "typed"), dev.shown.lines().filter { it.isNotEmpty() }.sorted())
+        assertEquals(true, dev.shown.startsWith("a\n") && dev.shown.indexOf("b\n") < dev.shown.indexOf("c\n"), dev.shown)
+        // Leaving writes it, as shown.
+        val shown = dev.shown
+        docs.leave(dev.room, dev)
+        assertEquals(shown, read(note))
+    }
+
+    @Test
+    fun `a note moved while open is written first and follows`() = runBlocking {
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC())
+        dav.makeFolders(scratch)
+        val note = scratch + "before.md"
+        val after = scratch + "after.md"
+        write(note, "x\n")
+        val dev = Device(docs)
+        dev.join(note)
+        dev.type(2, 2, "y\n")
+        // As the drive's move does: let go, move, then follow.
+        docs.release(note)
+        dav.move(note, after)
+        docs.moved(note, after)
+        assertEquals("x\ny\n", read(after))
+        // Opened at its new place, it's the same document (nothing typed twice).
+        val again = Device(docs)
+        again.join(after)
+        assertEquals("x\ny\n", again.shown)
+        docs.leave(again.room, again)
+    }
+
+    @Test
     fun `a note that isn't there can't be opened`() = runBlocking {
         val docs = SyncDocs(dav, props, db, Clock.systemUTC())
         assertNull(docs.join(scratch + "missing.md") { })
