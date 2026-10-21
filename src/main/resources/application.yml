@@ -18,9 +18,9 @@ spring:
       connect-timeout: 10s
       read-timeout: 30s
       redirects: follow
-  codec:
-    # Bodies read whole (JSON, calendars, pages): Codeforces' contest list alone is over a megabyte.
-    max-in-memory-size: 16MB
+    codecs:
+      # Bodies read whole (JSON, calendars, pages): Codeforces' contest list alone is over a megabyte.
+      max-in-memory-size: 16MB
 
 app:
   zone: Asia/Seoul
