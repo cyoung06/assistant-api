@@ -6,3 +6,4 @@ build
 src/test
 openapi.json
 *.md
+core/target

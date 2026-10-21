@@ -109,7 +109,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         if (ifNoneMatch != null && ifNoneMatch.trim() != "*") throw ResponseStatusException(HttpStatus.BAD_REQUEST, "If-None-Match on a write can only be *")
         val p = safe(path)
         if (p.isEmpty() || p.endsWith("/")) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "a file path is needed")
-        if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
+        if (DriveService.isCourseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
         dav.makeFolders(p.substringBeforeLast('/', ""))
         // Streamed straight to the drive (scans and videos can be large); its length, if the client said.
         val etag = try {
@@ -183,12 +183,10 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         if (p.isEmpty() || projectLevel && (parts.size == 1 || folder ?: dav.isFolder(p))) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Project folders follow the projects; change the project instead")
         }
-        if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
+        if (DriveService.isCourseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
         return p
     }
 
-    /** In a project's Course files (what PLMS has, kept as it is there), or that folder itself. */
-    private fun courseFile(p: String) = p.split('/').let { it.size >= 3 && it[0] == DriveService.PROJECTS && it[2] == DriveService.COURSE_FILES }
 
     /** An ETag as the drive gave it: a proxy compressing the response on the way marks it weak (W/). */
     private fun strong(etag: String) = etag.split(',').joinToString(", ") { it.trim().removePrefix("W/") }

@@ -105,6 +105,9 @@ class DriveService(private val dav: WebDav, private val projects: TaskRepository
         /** Each course project's files from PLMS: kept as PLMS has them (read-only here; copy one to write on it). */
         const val COURSE_FILES = "Course files"
 
+        /** In a project's Course files (what PLMS has, kept as it is there), or that folder itself. */
+        fun isCourseFile(path: String) = path.split('/').let { it.size >= 3 && it[0] == PROJECTS && it[2] == COURSE_FILES }
+
         /** A name usable as a file or folder name on any system. */
         fun safeName(name: String) = name.replace(Regex("""[/\\:*?"<>|\u0000-\u001f]"""), " ").replace(Regex("""\s+"""), " ").trim().trimEnd('.')
     }

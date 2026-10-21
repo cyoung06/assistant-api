@@ -1,0 +1,228 @@
+package com.syeyoung.assistant.sync
+
+import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.core.SyncDoc
+import com.syeyoung.assistant.drive.DriveService
+import com.syeyoung.assistant.drive.WebDav
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
+import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.core.io.buffer.DefaultDataBufferFactory
+import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.r2dbc.core.awaitOneOrNull
+import org.springframework.r2dbc.core.awaitRowsUpdated
+import org.springframework.stereotype.Component
+import reactor.core.publisher.Flux
+import java.nio.ByteBuffer
+import java.time.Clock
+import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
+
+/**
+ * Notes edited live (y-websocket, see [SyncSocket]): each open note is one Yjs document here
+ * ([SyncDoc], from the shared core), kept in the database, with the devices on it. This is the only
+ * writer of an open note's file: a second after edits stop, the text goes to the drive. An edit made
+ * to the file elsewhere (another app, through WebDAV) is merged in as an edit, so nothing is lost
+ * either way.
+ */
+@Component
+class SyncDocs(private val dav: WebDav, private val props: AppProperties, private val db: DatabaseClient, private val clock: Clock) {
+    private val log = LoggerFactory.getLogger(javaClass)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val rooms = ConcurrentHashMap<String, Room>()
+    private val opening = ConcurrentHashMap<String, Mutex>()
+
+    /** A device on a note: how to send it a message. */
+    fun interface Peer {
+        fun send(message: ByteArray)
+    }
+
+    /** An open note: its document and the devices on it. */
+    inner class Room(val path: String, val doc: SyncDoc, var etag: String?, var base: ByteArray) {
+        val peers = CopyOnWriteArraySet<Peer>()
+        /** One change to the document (and its saving) at a time. */
+        val lock = Mutex()
+        var save: Job? = null
+        var dirty = false
+    }
+
+    /** Notes that can be opened this way: Markdown in the drive, not a course file (those only read). */
+    fun syncable(path: String) = props.drive.enabled && path.endsWith(".md", ignoreCase = true) && !DriveService.isCourseFile(path)
+
+    /** [peer] joins the note at [path] (opened, from the database or the file, if no one has it open); null if there's no such note. */
+    suspend fun join(path: String, peer: Peer): Room? {
+        val room = rooms[path] ?: opening.computeIfAbsent(path) { Mutex() }.withLock { rooms[path] ?: open(path)?.also { rooms[path] = it } } ?: return null
+        room.peers += peer
+        return room
+    }
+
+    /** [peer] left: with no one left on the note, it's saved and let go. */
+    suspend fun leave(room: Room, peer: Peer) {
+        room.peers -= peer
+        if (room.peers.isNotEmpty()) return
+        room.save?.cancel()
+        save(room)
+        room.lock.withLock { if (room.peers.isEmpty()) rooms.remove(room.path, room) }
+    }
+
+    /** A message from [peer]: answered, passed on to the others, and the note saved soon after if it changed. */
+    suspend fun receive(room: Room, peer: Peer, message: ByteArray) {
+        val got = room.lock.withLock { withContext(Dispatchers.Default) { room.doc.receive(message) } }
+        got.reply?.let(peer::send)
+        got.broadcast?.let { out ->
+            // Awareness (who's there, their cursors) goes to everyone, the sender too (y-websocket's
+            // own server does the same, and its clients take that as the connection being alive).
+            val awareness = message.firstOrNull() == MESSAGE_AWARENESS
+            room.peers.forEach { if (awareness || it !== peer) it.send(out) }
+        }
+        if (got.changes.isNotEmpty()) later(room)
+    }
+
+    private suspend fun open(path: String): Room? {
+        val file = read(path)
+        val row = db.sql("select state, base_state, file_etag from sync_docs where path = :path").bind("path", path)
+            .map { r -> Triple(bytes(r.get("state", ByteBuffer::class.java)!!), bytes(r.get("base_state", ByteBuffer::class.java)!!), r.get("file_etag", String::class.java)) }
+            .awaitOneOrNull()
+        if (file == null) {
+            // Deleted (or moved) since: what was kept of it goes too.
+            if (row != null) forget(path)
+            return null
+        }
+        if (row == null) {
+            val doc = withContext(Dispatchers.Default) { SyncDoc.fromText(file.first) }
+            val state = doc.state()
+            store(path, state, state, file.second)
+            return Room(path, doc, file.second, state)
+        }
+        val (state, base, etag) = row
+        val room = Room(path, withContext(Dispatchers.Default) { SyncDoc.fromState(state) }, etag, base)
+        // Changed elsewhere while no one had it open.
+        if (file.second != etag) {
+            merge(room, file.first)
+            room.etag = file.second
+            room.base = room.doc.state()
+            store(path, room.base, room.base, room.etag)
+        }
+        return room
+    }
+
+    /** The file's text changed elsewhere to [text]: that change, made to the document as it was when the file last matched, merged in. */
+    private suspend fun merge(room: Room, text: String) = withContext(Dispatchers.Default) {
+        val fork = SyncDoc.fromState(room.base)
+        val before = fork.text()
+        if (before == text) return@withContext
+        val (from, to, insert) = difference(before, text)
+        val edit = fork.edit(from.toUInt(), to.toUInt(), insert)
+        val got = room.doc.receive(edit)
+        got.broadcast?.let { out -> room.peers.forEach { it.send(out) } }
+        log.info("{}: changed elsewhere, merged in", room.path)
+    }
+
+    private fun later(room: Room) {
+        room.dirty = true
+        room.save?.cancel()
+        room.save = scope.launch {
+            delay(SETTLE)
+            save(room)
+        }
+    }
+
+    /** Writes the note's text to its file and its document to the database (if anything changed). */
+    private suspend fun save(room: Room) {
+        room.lock.withLock {
+            if (!room.dirty) return
+            room.dirty = false
+            try {
+                // A few tries: each refusal means the file changed elsewhere, which is merged in first.
+                repeat(3) {
+                    val text = room.doc.text()
+                    val state = room.doc.state()
+                    try {
+                        val etag = dav.put(room.path, Flux.just(DefaultDataBufferFactory.sharedInstance.wrap(text.toByteArray())), null, "text/markdown; charset=utf-8", ifMatch = room.etag)
+                        room.etag = etag
+                        room.base = state
+                        store(room.path, state, state, etag)
+                        return
+                    } catch (e: WebDav.Changed) {
+                        val file = read(room.path) ?: run { log.info("{}: deleted elsewhere; not written", room.path); forget(room.path); return }
+                        merge(room, file.first)
+                        room.etag = file.second
+                        room.base = room.doc.state()
+                    }
+                }
+                error("it kept changing elsewhere")
+            } catch (e: Exception) {
+                room.dirty = true
+                log.warn("{}: not saved: {}", room.path, e.toString())
+            }
+        }
+    }
+
+    /** The file's text and version; null if it isn't there. */
+    private suspend fun read(path: String): Pair<String, String?>? {
+        val r = dav.get(path) ?: return null
+        val joined = DataBufferUtils.join(r.body ?: Flux.empty()).awaitSingleOrNull()
+        val text = joined?.let { b -> ByteArray(b.readableByteCount()).also { b.read(it); DataBufferUtils.release(b) }.decodeToString() } ?: ""
+        return text to dav.etag(path)
+    }
+
+    private suspend fun store(path: String, state: ByteArray, base: ByteArray, etag: String?) {
+        db.sql(
+            """
+            insert into sync_docs (path, state, base_state, file_etag, updated_at) values (:path, :state, :base, :etag, :now)
+            on conflict (path) do update set state = excluded.state, base_state = excluded.base_state, file_etag = excluded.file_etag, updated_at = excluded.updated_at
+            """.trimIndent(),
+        ).bind("path", path).bind("state", ByteBuffer.wrap(state)).bind("base", ByteBuffer.wrap(base))
+            .let { if (etag != null) it.bind("etag", etag) else it.bindNull("etag", String::class.java) }
+            .bind("now", Instant.now(clock))
+            .fetch().awaitRowsUpdated()
+    }
+
+    private suspend fun forget(path: String) {
+        db.sql("delete from sync_docs where path = :path").bind("path", path).fetch().awaitRowsUpdated()
+    }
+
+    /** On shutdown: what's unsaved is written. */
+    @PreDestroy
+    fun stop() {
+        runBlocking { rooms.values.forEach { it.save?.cancel(); save(it) } }
+        scope.cancel()
+    }
+
+    companion object {
+        /** How long after the last edit a note is written. */
+        private const val SETTLE = 1000L
+        /** y-protocols' awareness message type. */
+        private const val MESSAGE_AWARENESS: Byte = 1
+
+        private fun bytes(b: ByteBuffer) = ByteArray(b.remaining()).also { b.get(it) }
+
+        /**
+         * The one change that turns [before] into [after]: what's between their common start and end,
+         * in UTF-16 units (as the document counts).
+         */
+        fun difference(before: String, after: String): Triple<Int, Int, String> {
+            var start = 0
+            while (start < before.length && start < after.length && before[start] == after[start]) start++
+            // Not inside a surrogate pair.
+            if (start > 0 && Character.isHighSurrogate(before[start - 1])) start--
+            var end = 0
+            while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] == after[after.length - 1 - end]) end++
+            if (end > 0 && Character.isLowSurrogate(before[before.length - end])) end--
+            return Triple(start, before.length - end, after.substring(start, after.length - end))
+        }
+    }
+}

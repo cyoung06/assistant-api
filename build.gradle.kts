@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
 
 plugins {
     kotlin("jvm") version "2.3.21"
@@ -55,6 +57,9 @@ dependencies {
     // First-page previews of the drive's PDFs.
     implementation("org.apache.pdfbox:pdfbox:3.0.5")
 
+    // The shared core (core/, assistant-core: notes' live sync, Yjs by yrs), through its UniFFI bindings.
+    implementation("net.java.dev.jna:jna:5.17.0")
+
     // Compile scope for its jsonb type (io.r2dbc.postgresql.codec.Json).
     implementation("org.postgresql:r2dbc-postgresql")
     // Flyway runs migrations over JDBC.
@@ -85,4 +90,77 @@ tasks.jar {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// The shared core (assistant-core, the core/ submodule), built with cargo for the machine this
+// runs on: its library where JNA looks for it (<os>-<arch>/ on the classpath) and its Kotlin
+// bindings by UniFFI. The image's build passes them in ready-made instead (-PcorePrebuilt=<dir>,
+// with kotlin/ and native/ in it; see the Dockerfile).
+abstract class Cargo : DefaultTask() {
+    @get:InputFiles abstract val sources: ConfigurableFileCollection
+    @get:Internal abstract val crate: DirectoryProperty
+    @get:OutputDirectory abstract val output: DirectoryProperty
+    @get:Inject abstract val exec: ExecOperations
+
+    protected fun cargo(vararg args: String) {
+        // rustup's cargo, found here: the command is looked up on Gradle's own PATH, which may
+        // find another Rust (Homebrew's) whose cargo would mix toolchains with rustup's rustc.
+        val path = listOf("/opt/homebrew/opt/rustup/bin", "${System.getProperty("user.home")}/.cargo/bin") + System.getenv("PATH").split(":")
+        val cargo = path.map { File(it, "cargo") }.first { it.canExecute() }
+        exec.exec {
+            workingDir = crate.get().asFile
+            environment("PATH", path.joinToString(":"))
+            commandLine(listOf(cargo.path) + args)
+        }
+    }
+
+    /** The library's file name here, and JNA's resource directory for this machine. */
+    @get:Internal
+    protected val libraryFile = if (System.getProperty("os.name").startsWith("Mac")) "libassistant_core.dylib" else "libassistant_core.so"
+    @get:Internal
+    protected val jnaPrefix: String
+        get() {
+            val os = if (System.getProperty("os.name").startsWith("Mac")) "darwin" else "linux"
+            val arch = when (val a = System.getProperty("os.arch")) { "amd64", "x86_64" -> "x86-64"; "arm64" -> "aarch64"; else -> a }
+            return "$os-$arch"
+        }
+}
+
+/** The core's library, optimised. */
+abstract class CoreLibrary : Cargo() {
+    @TaskAction
+    fun build() {
+        cargo("build", "--release", "--lib")
+        val dir = output.get().asFile.resolve(jnaPrefix).apply { mkdirs() }
+        crate.get().asFile.resolve("target/release/$libraryFile").copyTo(dir.resolve(libraryFile), overwrite = true)
+    }
+}
+
+/** The core's Kotlin bindings, by UniFFI from a debug build (the release one is stripped of what it reads). */
+abstract class CoreBindings : Cargo() {
+    @TaskAction
+    fun generate() {
+        cargo("build", "--lib")
+        cargo("run", "--bin", "uniffi-bindgen", "--", "generate", "--library", "target/debug/$libraryFile", "--language", "kotlin", "--no-format", "--out-dir", output.get().asFile.path)
+    }
+}
+
+val corePrebuilt = providers.gradleProperty("corePrebuilt").orNull
+if (corePrebuilt != null) {
+    kotlin.sourceSets["main"].kotlin.srcDir("$corePrebuilt/kotlin")
+    sourceSets["main"].resources.srcDir("$corePrebuilt/native")
+} else {
+    val coreSources = listOf("src", "vendor", "Cargo.toml", "Cargo.lock", "uniffi.toml").map { file("core/$it") }
+    val coreLibrary = tasks.register<CoreLibrary>("coreLibrary") {
+        crate.set(layout.projectDirectory.dir("core"))
+        sources.from(coreSources)
+        output.set(layout.buildDirectory.dir("generated/core/native"))
+    }
+    val coreBindings = tasks.register<CoreBindings>("coreBindings") {
+        crate.set(layout.projectDirectory.dir("core"))
+        sources.from(coreSources)
+        output.set(layout.buildDirectory.dir("generated/core/kotlin"))
+    }
+    kotlin.sourceSets["main"].kotlin.srcDir(coreBindings)
+    sourceSets["main"].resources.srcDir(coreLibrary)
 }
