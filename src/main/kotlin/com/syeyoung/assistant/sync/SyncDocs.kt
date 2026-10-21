@@ -155,10 +155,15 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
 
     private suspend fun open(path: String): Room? {
         val kind = kindOf(path) ?: return null
-        val file = read(path)
         val row = db.sql("select state, base_state, file_etag from sync_docs where path = :path").bind("path", path)
             .map { r -> Triple(bytes(r.get("state", ByteBuffer::class.java)!!), bytes(r.get("base_state", ByteBuffer::class.java)!!), r.get("file_etag", String::class.java)) }
             .awaitOneOrNull()
+        // Kept and unchanged since (its version alone asked): opened as kept, without reading the
+        // file (a textbook's is megabytes).
+        if (row != null && row.third != null && dav.etag(path) == row.third) {
+            return Room(path, withContext(Dispatchers.Default) { kind.load(row.first) }, kind, row.third, row.second)
+        }
+        val file = read(path)
         if (file == null) {
             // Deleted (or moved) since: what was kept of it goes too.
             if (row != null) forget(path)
