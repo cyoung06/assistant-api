@@ -58,6 +58,15 @@
         "required" : [ "contentType", "createdAt", "filename", "id", "size" ],
         "type" : "object"
       },
+      "BlobPut" : {
+        "properties" : {
+          "hash" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "hash" ],
+        "type" : "object"
+      },
       "CalendarResponse" : {
         "properties" : {
           "color" : {
@@ -3160,6 +3169,70 @@
           }
         },
         "tags" : [ "source-controller" ]
+      }
+    },
+    "/api/v1/sync/blobs" : {
+      "post" : {
+        "operationId" : "put",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Content-Type",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "format" : "byte",
+                "type" : "string"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BlobPut"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "blobs-controller" ]
+      }
+    },
+    "/api/v1/sync/blobs/{hash}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "hash",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "blobs-controller" ]
       }
     },
     "/api/v1/tasks" : {

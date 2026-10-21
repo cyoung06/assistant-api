@@ -39,7 +39,7 @@ class SyncSocket(private val docs: SyncDocs) : WebSocketHandler {
             .switchIfEmpty(Mono.defer { session.close(CloseStatus.POLICY_VIOLATION.withReason("no such note")).then(Mono.empty()) })
             .flatMap { room ->
                 // As y-websocket's server does: its sync step 1 first, so the device sends what it has.
-                peer.send(room.doc.start())
+                peer.send(docs.greeting(room))
                 val input = session.receive()
                     .map { m -> ByteArray(m.payload.readableByteCount()).also { m.payload.read(it) } }
                     .concatMap { message -> mono { docs.receive(room, peer, message) } }

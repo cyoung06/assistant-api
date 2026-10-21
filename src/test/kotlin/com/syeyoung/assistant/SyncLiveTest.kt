@@ -4,6 +4,7 @@ import com.syeyoung.assistant.config.AppProperties
 import com.syeyoung.assistant.core.SyncDoc
 import com.syeyoung.assistant.core.TextChange
 import com.syeyoung.assistant.drive.WebDav
+import com.syeyoung.assistant.sync.Blobs
 import com.syeyoung.assistant.sync.SyncDocs
 import io.r2dbc.spi.ConnectionFactories
 import kotlinx.coroutines.delay
@@ -44,7 +45,7 @@ class SyncLiveTest {
 
     init {
         runBlocking {
-            db.sql(File("src/main/resources/db/migration/V16__sync.sql").readText().replace("create table", "create table if not exists")).await()
+            for (m in listOf("V16__sync.sql", "V17__sync_blobs.sql")) db.sql(File("src/main/resources/db/migration/$m").readText().replace("create table", "create table if not exists")).await()
         }
     }
 
@@ -59,7 +60,7 @@ class SyncLiveTest {
 
         suspend fun join(path: String) {
             room = docs.join(path, this)!!
-            send(room.doc.start())
+            send(docs.greeting(room))
             docs.receive(room, this, doc.start())
             drain()
         }
@@ -104,7 +105,7 @@ class SyncLiveTest {
 
     @Test
     fun `two devices edit a note together, and the file follows`() = runBlocking {
-        val docs = SyncDocs(dav, props, db, Clock.systemUTC())
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC()))
         dav.makeFolders(scratch)
         val note = scratch + "note.md"
         write(note, "하나 둘 셋\n")
@@ -148,7 +149,7 @@ class SyncLiveTest {
 
     @Test
     fun `a note changed elsewhere while closed opens as the file is now`() = runBlocking {
-        val docs = SyncDocs(dav, props, db, Clock.systemUTC())
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC()))
         dav.makeFolders(scratch)
         val note = scratch + "closed.md"
         write(note, "first\n")
@@ -168,7 +169,7 @@ class SyncLiveTest {
     @Test
     fun `writes through the drive reach the devices, and don't undo what they type meanwhile`() = runBlocking {
         // What the device types stays unwritten while the file is written elsewhere.
-        val docs = SyncDocs(dav, props, db, Clock.systemUTC()).apply { settle = 15_000 }
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC())).apply { settle = 15_000 }
         dav.makeFolders(scratch)
         val note = scratch + "written.md"
         write(note, "a\n")
@@ -193,7 +194,7 @@ class SyncLiveTest {
 
     @Test
     fun `a note moved while open is written first and follows`() = runBlocking {
-        val docs = SyncDocs(dav, props, db, Clock.systemUTC())
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC()))
         dav.makeFolders(scratch)
         val note = scratch + "before.md"
         val after = scratch + "after.md"
@@ -213,9 +214,85 @@ class SyncLiveTest {
         docs.leave(again.room, again)
     }
 
+    /** A device on a notebook: its document, and what it was told changed. */
+    private inner class Book(val docs: SyncDocs) : SyncDocs.Peer {
+        val doc = com.syeyoung.assistant.core.NotebookDoc()
+        lateinit var room: SyncDocs.Room
+        private val inbox = ArrayDeque<ByteArray>()
+        override fun send(message: ByteArray) = synchronized(inbox) { inbox.addLast(message) }
+
+        suspend fun join(path: String) {
+            room = docs.join(path, this)!!
+            send(docs.greeting(room))
+            docs.receive(room, this, doc.start())
+            drain()
+        }
+
+        suspend fun drain() {
+            while (true) {
+                val m = synchronized(inbox) { inbox.removeFirstOrNull() } ?: return
+                doc.receive(m).reply?.let { docs.receive(room, this, it) }
+            }
+        }
+
+        suspend fun edit(vararg edits: com.syeyoung.assistant.core.NotebookEdit) = docs.receive(room, this, doc.edit(edits.toList()))
+    }
+
+    private suspend fun writeBytes(path: String, bytes: ByteArray, ifMatch: String? = null) =
+        dav.put(path, Flux.just(DefaultDataBufferFactory.sharedInstance.wrap(bytes)), bytes.size.toLong(), "application/pdf", ifMatch = ifMatch)
+
+    private suspend fun readBytes(path: String): ByteArray {
+        val b = DataBufferUtils.join(dav.get(path)!!.body!!).awaitSingle()
+        return ByteArray(b.readableByteCount()).also { b.read(it); DataBufferUtils.release(b) }
+    }
+
+    @Test
+    fun `a notebook is drawn on by two devices, and the PDF follows`() = runBlocking {
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC())).apply { settle = 1000 }
+        dav.makeFolders(scratch)
+        val path = scratch + "book.pdf"
+        writeBytes(path, org.apache.pdfbox.pdmodel.PDDocument().use { d -> repeat(2) { d.addPage(org.apache.pdfbox.pdmodel.PDPage(org.apache.pdfbox.pdmodel.common.PDRectangle.A4)) }; java.io.ByteArrayOutputStream().also { d.save(it) }.toByteArray() })
+
+        val tablet = Book(docs)
+        tablet.join(path)
+        assertEquals(2, tablet.doc.pages().size)
+        val page = tablet.doc.pages()[1].id
+        val stroke = com.syeyoung.assistant.core.NotebookStroke("s1", page, "pen", 0xFF1E5BD8u, 0.6f, listOf(50f, 60f, 0.4f, 90f, 100f, 0.8f), listOf(listOf(49f, 59f, 91f, 99f, 89f, 101f)), byteArrayOf(5, 6), null)
+        tablet.edit(com.syeyoung.assistant.core.NotebookEdit.PutStroke(stroke))
+        delay(2500)
+        // In the file: the stroke, on its page, with its id and Ink data; the pages with theirs.
+        val written = com.syeyoung.assistant.sync.NotebookPdf.read(readBytes(path))
+        assertEquals(tablet.doc.pages().map { it.id }, written.pages.map { it.id })
+        assertEquals(listOf("s1"), written.strokes.map { it.id })
+        assertEquals(page, written.strokes[0].page)
+        assertEquals(listOf<Byte>(5, 6), written.strokes[0].ink?.toList())
+
+        // Another device sees it, and erases it.
+        val mac = Book(docs)
+        mac.join(path)
+        assertEquals(listOf("s1"), mac.doc.strokes().map { it.id })
+        mac.edit(com.syeyoung.assistant.core.NotebookEdit.RemoveStroke("s1"))
+        tablet.drain()
+        assertEquals(emptyList<String>(), tablet.doc.strokes().map { it.id })
+        delay(2500)
+        assertEquals(emptyList<String>(), com.syeyoung.assistant.sync.NotebookPdf.read(readBytes(path)).strokes.map { it.id })
+
+        // Written elsewhere (an app without live editing adds a stroke): the devices get it.
+        val now = com.syeyoung.assistant.sync.NotebookPdf.read(readBytes(path))
+        val elsewhere = stroke.copy(id = "s2", page = now.pages[0].id)
+        val base = Blobs(db, Clock.systemUTC()).let { com.syeyoung.assistant.sync.NotebookPdf.write(now.base, now.pages, listOf(elsewhere), emptyList(), emptyList()) }
+        writeBytes(path, base, ifMatch = dav.etag(path))
+        docs.written(path)
+        tablet.drain(); mac.drain()
+        assertEquals(listOf("s2"), tablet.doc.strokes().map { it.id })
+        assertEquals(listOf("s2"), mac.doc.strokes().map { it.id })
+        docs.leave(tablet.room, tablet)
+        docs.leave(mac.room, mac)
+    }
+
     @Test
     fun `a note that isn't there can't be opened`() = runBlocking {
-        val docs = SyncDocs(dav, props, db, Clock.systemUTC())
+        val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC()))
         assertNull(docs.join(scratch + "missing.md") { })
     }
 }
