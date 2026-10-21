@@ -95,6 +95,16 @@ class WebDavLiveTest {
     }
 
     @Test
+    fun `folders are told from files, with or without their slash`() = runBlocking {
+        dav.makeFolders(scratch + "kind")
+        dav.put(scratch + "kind.md", bytes("k".toByteArray()), 1, "text/markdown")
+        assertTrue(dav.isFolder(scratch + "kind"))
+        assertTrue(dav.isFolder(scratch + "kind/"))
+        assertFalse(dav.isFolder(scratch + "kind.md"))
+        assertFalse(dav.isFolder(scratch + "missing"))
+    }
+
+    @Test
     fun `a big upload streams through`() = runBlocking {
         val chunk = ByteArray(1 shl 20) { (it % 251).toByte() }
         val count = 24

@@ -70,6 +70,13 @@ class WebDav(props: AppProperties, web: WebClient.Builder) {
 
     suspend fun exists(path: String): Boolean = propfind(path, depth = 0).status == 207
 
+    /** Whether a folder (not a file) is at [path]. */
+    suspend fun isFolder(path: String): Boolean {
+        // Asked as a folder: a file isn't found that way (and a folder isn't redirected to its "/").
+        val r = propfind(path.trimEnd('/') + "/", depth = 0)
+        return r.status == 207 && responses(r.body).any { it.getElementsByTagNameNS(DAV, "collection").length > 0 }
+    }
+
     /** Makes the folder and any missing parents. */
     suspend fun makeFolders(folder: String) {
         var at = ""

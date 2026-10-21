@@ -124,7 +124,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
     @PostMapping("/folder")
     suspend fun makeFolder(@RequestParam path: String): ResponseEntity<Unit> {
         requireEnabled()
-        dav.makeFolders(editable(path))
+        dav.makeFolders(editable(path, folder = true))
         return ResponseEntity.noContent().build()
     }
 
@@ -132,10 +132,11 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
     @PostMapping("/move")
     suspend fun moveFile(@RequestParam from: String, @RequestParam to: String): ResponseEntity<Unit> {
         requireEnabled()
-        val target = editable(to)
+        val source = editable(from)
+        val target = editable(to, folder = dav.isFolder(source))
         dav.makeFolders(target.substringBeforeLast('/', ""))
         try {
-            dav.move(editable(from), target)
+            dav.move(source, target)
         } catch (e: IllegalStateException) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Something is already called that")
         }
@@ -151,7 +152,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         requireEnabled()
         val source = safe(from)
         if (source.isEmpty()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "nothing to copy")
-        var target = editable(to)
+        var target = editable(to, folder = dav.isFolder(source))
         dav.makeFolders(target.substringBeforeLast('/', ""))
         val dot = target.substringAfterLast('/').lastIndexOf('.').let { if (it <= 0 || from.endsWith("/")) -1 else target.length - target.substringAfterLast('/').length + it }
         val (stem, ext) = if (dot < 0) target to "" else target.substring(0, dot) to target.substring(dot)
@@ -171,12 +172,15 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
 
     /**
      * A path that may be changed: not the drive's top, Projects/, or a project's own folder (those
-     * follow the projects), and nothing among a course's files from PLMS.
+     * follow the projects), and nothing among a course's files from PLMS. Files beside the project
+     * folders may be: [folder] is whether it's a folder that's being made or put there (else
+     * whether one is there).
      */
-    private fun editable(path: String): String {
+    private suspend fun editable(path: String, folder: Boolean? = null): String {
         val p = safe(path)
-        val depth = p.split('/').size
-        if (p.isEmpty() || (p.startsWith("${DriveService.PROJECTS}/") || p == DriveService.PROJECTS) && depth <= 2) {
+        val parts = p.split('/')
+        val projectLevel = parts[0] == DriveService.PROJECTS && parts.size <= 2
+        if (p.isEmpty() || projectLevel && (parts.size == 1 || folder ?: dav.isFolder(p))) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Project folders follow the projects; change the project instead")
         }
         if (courseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
