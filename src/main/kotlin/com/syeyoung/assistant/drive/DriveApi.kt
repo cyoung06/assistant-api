@@ -33,12 +33,14 @@ data class DriveFolder(val path: String, val entries: List<DriveEntry>)
 
 data class DriveCopied(val path: String)
 
+data class DriveRestored(val path: String)
+
 private const val READ_ONLY = "Course files are kept as PLMS has them; copy one out to change it"
 
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs) {
+class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash) {
 
     @GetMapping
     fun driveInfo() = DriveInfo(drive.enabled, props.drive.publicUrl, props.drive.username)
@@ -56,7 +58,10 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
     suspend fun folder(@RequestParam(defaultValue = "") path: String): DriveFolder {
         requireEnabled()
         val folder = safe(path).let { if (it.isEmpty()) "" else "$it/" }
-        return DriveFolder(folder, dav.list(folder) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND))
+        if (folder.startsWith(DriveTrash.TRASH + "/")) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val entries = dav.list(folder) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        // The trash is listed by itself (see /trash), not as a folder.
+        return DriveFolder(folder, entries.filter { it.path != DriveTrash.TRASH + "/" })
     }
 
     /**
@@ -169,14 +174,43 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         return DriveCopied(target)
     }
 
-    /** Deletes a file or folder (with what's in it). */
+    /** Deletes a file or folder (with what's in it): to the trash, kept 30 days (see [DriveTrash]). */
     @DeleteMapping("/file")
     suspend fun deleteFile(@RequestParam path: String): ResponseEntity<Unit> {
         requireEnabled()
         val p = editable(path)
-        live.release(p)
-        dav.delete(p)
-        live.moved(p, null)
+        if (!dav.exists(p) && !dav.isFolder(p)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        trash.trash(p)
+        return ResponseEntity.noContent().build()
+    }
+
+    /** What's in the trash, latest first. */
+    @GetMapping("/trash")
+    suspend fun listTrash(): List<Trashed> {
+        requireEnabled()
+        return trash.list()
+    }
+
+    /** Puts something back where it was (numbered if that name's taken now); where it went. */
+    @PostMapping("/trash/{id}/restore")
+    suspend fun restoreTrashed(@PathVariable id: UUID): DriveRestored {
+        requireEnabled()
+        return DriveRestored(trash.restore(id) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND))
+    }
+
+    /** Deletes one thing from the trash for good. */
+    @DeleteMapping("/trash/{id}")
+    suspend fun purgeTrashed(@PathVariable id: UUID): ResponseEntity<Unit> {
+        requireEnabled()
+        if (!trash.purge(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return ResponseEntity.noContent().build()
+    }
+
+    /** Empties the trash: everything in it deleted for good. */
+    @DeleteMapping("/trash")
+    suspend fun emptyTrash(): ResponseEntity<Unit> {
+        requireEnabled()
+        for (item in trash.list()) trash.purge(item.id)
         return ResponseEntity.noContent().build()
     }
 
@@ -194,6 +228,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Project folders follow the projects; change the project instead")
         }
         if (DriveService.isCourseFile(p)) throw ResponseStatusException(HttpStatus.FORBIDDEN, READ_ONLY)
+        if (p == DriveTrash.TRASH || p.startsWith(DriveTrash.TRASH + "/")) throw ResponseStatusException(HttpStatus.FORBIDDEN, "The trash is changed through /trash")
         return p
     }
 
