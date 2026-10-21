@@ -63,12 +63,13 @@ class SyncSocketConfig : WebFluxConfigurer {
 
     /**
      * Messages up to [MAX_MESSAGE] (Reactor Netty's default is 64 KiB a frame): a device catching up
-     * after editing offline sends all it did at once, and a notebook's stroke carries its outline.
+     * after editing offline sends all it did at once, and a notebook's stroke carries its outline. Each
+     * is held whole while it's read, so not more than the container can take beside everything else.
      */
     override fun getWebSocketService(): WebSocketService =
         HandshakeWebSocketService(ReactorNettyRequestUpgradeStrategy { WebsocketServerSpec.builder().maxFramePayloadLength(MAX_MESSAGE) })
 
     companion object {
-        const val MAX_MESSAGE = 64 shl 20
+        const val MAX_MESSAGE = 256 shl 20
     }
 }
