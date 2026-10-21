@@ -5,7 +5,12 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.HandlerMapping
+import org.springframework.web.reactive.config.WebFluxConfigurer
 import org.springframework.web.reactive.handler.SimpleUrlHandlerMapping
+import org.springframework.web.reactive.socket.server.WebSocketService
+import org.springframework.web.reactive.socket.server.support.HandshakeWebSocketService
+import org.springframework.web.reactive.socket.server.upgrade.ReactorNettyRequestUpgradeStrategy
+import reactor.netty.http.server.WebsocketServerSpec
 import org.springframework.web.reactive.socket.CloseStatus
 import org.springframework.web.reactive.socket.WebSocketHandler
 import org.springframework.web.reactive.socket.WebSocketSession
@@ -52,7 +57,18 @@ class SyncSocket(private val docs: SyncDocs) : WebSocketHandler {
 }
 
 @Configuration
-class SyncSocketConfig {
+class SyncSocketConfig : WebFluxConfigurer {
     @Bean
     fun syncSocketMapping(socket: SyncSocket): HandlerMapping = SimpleUrlHandlerMapping(mapOf("/api/v1/sync" to socket), -1)
+
+    /**
+     * Messages up to [MAX_MESSAGE] (Reactor Netty's default is 64 KiB a frame): a device catching up
+     * after editing offline sends all it did at once, and a notebook's stroke carries its outline.
+     */
+    override fun getWebSocketService(): WebSocketService =
+        HandshakeWebSocketService(ReactorNettyRequestUpgradeStrategy { WebsocketServerSpec.builder().maxFramePayloadLength(MAX_MESSAGE) })
+
+    companion object {
+        const val MAX_MESSAGE = 64 shl 20
+    }
 }
