@@ -22,6 +22,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -51,14 +52,17 @@ class PlmsCatalog(
         scope.launch {
             delay(props.sources.initialDelay.toMillis() * 2)
             while (isActive) {
-                try {
+                val next = try {
                     refresh()
+                    props.sources.plms.catalogInterval
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     log.warn("PLMS catalog refresh failed: {}", e.toString())
+                    // New course files come with the refresh: a failed one isn't left for hours.
+                    minOf(props.sources.plms.catalogInterval, RETRY)
                 }
-                delay(props.sources.plms.catalogInterval.toMillis())
+                delay(next.toMillis())
             }
         }
     }
@@ -134,6 +138,9 @@ class PlmsCatalog(
     fun stop() = scope.cancel()
 
     companion object {
+        /** After a failed refresh, the next try (PLMS's wait after a wrong password is as long). */
+        private val RETRY: Duration = Duration.ofMinutes(30)
+
         const val SOURCE = "plms"
         private val ZONE = ZoneId.of("Asia/Seoul")
         private val STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")

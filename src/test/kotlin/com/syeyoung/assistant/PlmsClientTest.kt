@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.boot.http.client.HttpClientSettings
@@ -27,6 +28,8 @@ import java.time.Instant
  */
 class PlmsClientTest {
     private var logins = 0
+    /** How many login forms are refused (as with an expired login token) before they're taken. */
+    private var rejectForms = 0
     private val moodle = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/") { ex ->
             val cookie = ex.requestHeaders.getFirst("Cookie").orEmpty()
@@ -40,10 +43,15 @@ class PlmsClientTest {
                 path == "/login/index.php" && ex.requestMethod == "POST" -> {
                     logins++
                     val form = ex.requestBody.readAllBytes().decodeToString()
-                    if ("MoodleSession=before" in cookie && "logintoken=LT1" in form && "password=right" in form) {
-                        ex.responseHeaders.add("Set-Cookie", "MoodleSession=after; Path=/; HttpOnly")
-                        redirect(ex, "/login/index.php?testsession=7")
-                    } else respond(ex, 200, "<p>Invalid login</p>")
+                    when {
+                        // A form Moodle no longer takes comes back without saying why.
+                        rejectForms > 0 -> respond(ex, 200, "<form></form>").also { rejectForms-- }
+                        "MoodleSession=before" in cookie && "logintoken=LT1" in form && "password=right" in form -> {
+                            ex.responseHeaders.add("Set-Cookie", "MoodleSession=after; Path=/; HttpOnly")
+                            redirect(ex, "/login/index.php?testsession=7")
+                        }
+                        else -> respond(ex, 200, """<p class="loginerrormessage">Invalid login</p>""")
+                    }
                 }
                 path == "/login/index.php" && query == "testsession=7" && "MoodleSession=after" in cookie -> redirect(ex, "/my/")
                 path == "/my/" && "MoodleSession=after" in cookie -> respond(ex, 200, """M.cfg = {"sesskey":"SK1"}; MOODLE_WSTOKEN = "abc123";""")
@@ -106,6 +114,19 @@ class PlmsClientTest {
         assertEquals(1, logins)
         assertEquals(42, client("right", failures).call("core_test", emptyMap()).path("answer").asInt())
         assertEquals(2, logins)
+    }
+
+    @Test
+    fun `a login form that isn't taken is tried again, and isn't a wrong password`() = runBlocking {
+        val failures = Failures()
+        rejectForms = 1
+        assertEquals(42, client("right", failures).call("core_test", emptyMap()).path("answer").asInt())
+        assertEquals(2, logins)
+        assertNull(failures.last)
+        // Refused again and again: given up for now, still not held against the password.
+        rejectForms = 2
+        assertThrows<PlmsException> { runBlocking { client("right", failures).call("core_test", emptyMap()) } }
+        assertNull(failures.last)
     }
 
     @Test

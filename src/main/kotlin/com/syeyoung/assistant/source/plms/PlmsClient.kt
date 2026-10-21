@@ -176,16 +176,26 @@ class PlmsClient(
         failures.last()?.let { (at, with) ->
             if (with == credentials && Instant.now() < at.plus(LOGIN_BACKOFF)) throw PlmsException("PLMS login failed recently; trying again after ${at.plus(LOGIN_BACKOFF)}")
         }
-        cookies.cookieStore.removeAll()
-        val form = send(URI("$baseUrl/login/index.php"))
-        val token = LOGIN_TOKEN.find(form.body)?.groupValues?.get(1)
-            ?: throw PlmsException("PLMS login page changed: no login token found")
-        val response = send(URI("$baseUrl/login/index.php"), Body.Form(mapOf("anchor" to "", "logintoken" to token, "username" to username, "password" to password)))
-        // A failed login stays on the login page; a successful one redirects away from it.
-        if (response.url.path.startsWith("/login/")) {
-            failures.failed(Instant.now(), credentials)
-            throw PlmsException("PLMS login failed: check the username and password")
+        // A failed login stays on the login page; a successful one redirects away from it. Moodle says
+        // why only when it's the password: a login form it no longer takes (its token, or the session
+        // it was for, gone) just comes back, and a fresh one is tried once.
+        var response: Page? = null
+        for (attempt in 1..2) {
+            cookies.cookieStore.removeAll()
+            val form = send(URI("$baseUrl/login/index.php"))
+            val token = LOGIN_TOKEN.find(form.body)?.groupValues?.get(1)
+                ?: throw PlmsException("PLMS login page changed: no login token found")
+            val page = send(URI("$baseUrl/login/index.php"), Body.Form(mapOf("anchor" to "", "logintoken" to token, "username" to username, "password" to password)))
+            if (!page.url.path.startsWith("/login/")) {
+                response = page
+                break
+            }
+            if (LOGIN_ERROR in page.body) {
+                failures.failed(Instant.now(), credentials)
+                throw PlmsException("PLMS login failed: check the username and password")
+            }
         }
+        if (response == null) throw PlmsException("PLMS didn't take the login form (twice); trying again next time")
         failures.cleared()
         val key = SESSKEY.find(response.body)?.groupValues?.get(1)
             ?: throw PlmsException("PLMS login succeeded but no session key was found")
@@ -284,6 +294,8 @@ class PlmsClient(
         private const val MAX_REDIRECTS = 10
         private const val USER_AGENT = "assistant-sync/1.0"
         private val LOGIN_TOKEN = Regex("""name="logintoken" value="([^"]+)"""")
+        /** What Moodle's login page shows when the username or password is wrong. */
+        private const val LOGIN_ERROR = "loginerrormessage"
         private val SESSKEY = Regex(""""sesskey":"([^"]+)"""")
         private val WS_TOKEN = Regex("""MOODLE_WSTOKEN = "([0-9a-f]+)"""")
         private val TOKEN_ERRORS = setOf("invalidtoken")
