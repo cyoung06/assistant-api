@@ -12,7 +12,7 @@ import com.syeyoung.assistant.core.SyncDoc
  * it's synced is the same for both; how it's made from its file, written to it, and how a change
  * made to the file elsewhere is merged in, is each kind's own.
  */
-internal sealed interface Live {
+internal sealed interface Live : AutoCloseable {
     /** What a message did: [reply] to its sender, [broadcast] to the others, and whether the document [changed]. */
     class Got(val reply: ByteArray?, val broadcast: ByteArray?, val changed: Boolean)
 
@@ -33,6 +33,9 @@ internal sealed interface Live {
     /** Whether the document matches [file] (written as merged when it doesn't). */
     fun matches(file: ByteArray): Boolean
 
+    /** Lets the document go: it's the core's, in native memory, which the JVM's collector doesn't see filling. */
+    override fun close()
+
     /** One kind of file: how a document is made for it, and its content type. */
     interface Kind {
         val type: String
@@ -51,16 +54,18 @@ internal class LiveNote(val doc: SyncDoc) : Live {
     override fun state() = doc.state()
     override fun matches(file: ByteArray) = doc.text() == file.decodeToString()
     override suspend fun content() = doc.text().toByteArray()
+    override fun close() = doc.close()
 
     override suspend fun merge(base: ByteArray, file: ByteArray, tell: (ByteArray) -> Unit): ByteArray {
-        val fork = SyncDoc.fromState(base)
-        val before = fork.text()
-        val text = file.decodeToString()
-        if (before != text) {
-            val (from, to, insert) = SyncDocs.difference(before, text)
-            doc.receive(fork.edit(from.toUInt(), to.toUInt(), insert)).broadcast?.let(tell)
+        SyncDoc.fromState(base).use { fork ->
+            val before = fork.text()
+            val text = file.decodeToString()
+            if (before != text) {
+                val (from, to, insert) = SyncDocs.difference(before, text)
+                doc.receive(fork.edit(from.toUInt(), to.toUInt(), insert)).broadcast?.let(tell)
+            }
+            return fork.state()
         }
-        return fork.state()
     }
 
     object Kind : Live.Kind {
@@ -79,6 +84,7 @@ internal class LiveNotebook(val doc: NotebookDoc, private val blobs: Blobs) : Li
 
     /** Written from here (with every save): whether it's the same is told by the merge, not by its bytes. */
     override fun matches(file: ByteArray) = true
+    override fun close() = doc.close()
 
     override suspend fun content(): ByteArray {
         val base = blobs.get(doc.base())?.data ?: error("its base PDF isn't kept")
@@ -87,10 +93,11 @@ internal class LiveNotebook(val doc: NotebookDoc, private val blobs: Blobs) : Li
     }
 
     override suspend fun merge(base: ByteArray, file: ByteArray, tell: (ByteArray) -> Unit): ByteArray {
-        val fork = NotebookDoc.fromState(base)
-        val edits = differences(fork, read(file, blobs))
-        if (edits.isNotEmpty()) doc.receive(fork.edit(edits)).broadcast?.let(tell)
-        return fork.state()
+        NotebookDoc.fromState(base).use { fork ->
+            val edits = differences(fork, read(file, blobs))
+            if (edits.isNotEmpty()) doc.receive(fork.edit(edits)).broadcast?.let(tell)
+            return fork.state()
+        }
     }
 
     object Kinds {

@@ -89,7 +89,7 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
         if (room.peers.isNotEmpty()) return
         room.save?.cancel()
         save(room)
-        room.lock.withLock { if (room.peers.isEmpty()) rooms.remove(room.path, room) }
+        room.lock.withLock { if (room.peers.isEmpty() && rooms.remove(room.path, room)) room.live.close() }
     }
 
     /** A message from [peer]: answered, passed on to the others, and the note saved soon after if it changed. */
@@ -115,6 +115,7 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
             save(room)
             rooms.remove(room.path, room)
             room.peers.forEach { it.close() }
+            room.lock.withLock { room.live.close() }
         }
     }
 

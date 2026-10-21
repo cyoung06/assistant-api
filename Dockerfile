@@ -30,4 +30,5 @@ COPY --from=build /app/application/ ./
 USER 10001
 ENV TZ=Asia/Seoul
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "org.springframework.boot.loader.launch.JarLauncher"]
+# The heap at 60%: the rest is for what's off it (Netty's buffers, the core's live documents, PDFBox).
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "org.springframework.boot.loader.launch.JarLauncher"]
