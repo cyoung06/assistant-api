@@ -33,7 +33,7 @@ data class Trashed(val id: UUID, val path: String, val name: String, val folder:
  * back as it was. Deleting straight over WebDAV (outside the API) still deletes.
  */
 @Component
-class DriveTrash(private val dav: WebDav, private val db: DatabaseClient, private val live: SyncDocs, private val clock: Clock, private val state: DriveFileState) {
+class DriveTrash(private val dav: WebDav, private val db: DatabaseClient, private val live: SyncDocs, private val clock: Clock, private val state: DriveFileState, private val annotations: DriveAnnotations) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -53,6 +53,7 @@ class DriveTrash(private val dav: WebDav, private val db: DatabaseClient, privat
         dav.move(from, to)
         live.moved(from, to)
         state.moved(from, to)
+        annotations.moved(from, to)
         db.sql("insert into drive_trash (id, path, name, folder, size, deleted_at) values (:id, :path, :name, :folder, :size, :at)")
             .bind("id", item.id).bind("path", item.path).bind("name", name).bind("folder", folder).bind("size", size).bind("at", item.deletedAt)
             .fetch().awaitRowsUpdated()
@@ -92,6 +93,7 @@ class DriveTrash(private val dav: WebDav, private val db: DatabaseClient, privat
         dav.move(from, target)
         live.moved(from, target)
         state.moved(from, target)
+        annotations.moved(from, target)
         dav.delete("$TRASH/$id/")
         db.sql("delete from drive_trash where id = :id").bind("id", id).fetch().awaitRowsUpdated()
         return target + if (item.folder) "/" else ""
@@ -105,6 +107,7 @@ class DriveTrash(private val dav: WebDav, private val db: DatabaseClient, privat
         dav.delete("$TRASH/$id/")
         live.moved(at, null)
         state.moved(at, null)
+        annotations.moved(at, null)
         db.sql("delete from drive_trash where id = :id").bind("id", id).fetch().awaitRowsUpdated()
         return true
     }

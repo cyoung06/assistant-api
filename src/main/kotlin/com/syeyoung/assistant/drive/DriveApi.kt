@@ -42,7 +42,7 @@ private const val READ_ONLY = "Course files are kept as PLMS has them; copy one 
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash, private val state: DriveFileState) {
+class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash, private val state: DriveFileState, private val annotations: DriveAnnotations) {
 
     @GetMapping
     fun driveInfo() = DriveInfo(drive.enabled, props.drive.publicUrl, props.drive.username)
@@ -154,6 +154,7 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
         }
         live.moved(source, target)
         state.moved(source, target)
+        annotations.moved(source, target)
         return ResponseEntity.noContent().build()
     }
 
@@ -174,6 +175,41 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
     /** The starred files and folders. */
     @GetMapping("/starred")
     suspend fun starredFiles(): List<FileState> = state.starred()
+
+    // ---- course files written on in a copy (see [DriveAnnotations]) ----
+
+    /** The copy of the course PDF at [path] to write on: the one made before, or a new one in the project's Notes. */
+    @PostMapping("/annotate")
+    suspend fun annotate(@RequestParam path: String): Annotation {
+        requireEnabled()
+        val source = safe(path)
+        if (!DriveService.isCourseFile(source) || !source.endsWith(".pdf", ignoreCase = true)) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Only course PDFs are annotated in a copy")
+        if (!dav.exists(source)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return annotations.annotate(source)
+    }
+
+    /** What [path] is part of: a copy and its course file (and whether that's been updated), or a course file and its copy. */
+    @GetMapping("/annotation")
+    suspend fun annotation(@RequestParam path: String): ResponseEntity<Annotation> {
+        requireEnabled()
+        return annotations.of(safe(path))?.let { ResponseEntity.ok(it) } ?: ResponseEntity.noContent().build()
+    }
+
+    /** Carries the writing in the copy at [path] over to its course file's new version. */
+    @PostMapping("/annotation/carry")
+    suspend fun carryAnnotation(@RequestParam path: String): ResponseEntity<Unit> {
+        requireEnabled()
+        if (!annotations.carry(safe(path))) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return ResponseEntity.noContent().build()
+    }
+
+    /** Keeps the copy at [path] as it is, on the version it has (its course file's update is let be). */
+    @PostMapping("/annotation/dismiss")
+    suspend fun dismissAnnotation(@RequestParam path: String): ResponseEntity<Unit> {
+        requireEnabled()
+        if (!annotations.dismiss(safe(path))) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return ResponseEntity.noContent().build()
+    }
 
     /** A drive path as files' states keep it: a folder's with its "/". */
     private fun safePath(path: String) = safe(path).let { if (path.endsWith("/") && it.isNotEmpty()) "$it/" else it }

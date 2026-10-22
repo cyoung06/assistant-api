@@ -1,6 +1,7 @@
 package com.syeyoung.assistant
 
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.drive.DriveAnnotations
 import com.syeyoung.assistant.drive.DriveFileState
 import com.syeyoung.assistant.drive.DriveTrash
 import com.syeyoung.assistant.drive.WebDav
@@ -39,11 +40,12 @@ class DriveTrashLiveTest {
     private val db = DatabaseClient.create(ConnectionFactories.get("r2dbc:postgresql://postgres:postgres@${TestDatabase.host}:${TestDatabase.port}/postgres"))
     private val scratch = "_api-test-${UUID.randomUUID()}"
     private val docs = SyncDocs(dav, props, db, Clock.systemUTC(), Blobs(db, Clock.systemUTC()))
-    private val trash = DriveTrash(dav, db, docs, Clock.systemUTC(), DriveFileState(db, Clock.systemUTC()))
+    private val blobs = Blobs(db, Clock.systemUTC())
+    private val trash = DriveTrash(dav, db, docs, Clock.systemUTC(), DriveFileState(db, Clock.systemUTC()), DriveAnnotations(dav, db, Clock.systemUTC(), docs, blobs))
 
     init {
         runBlocking {
-            for (m in listOf("V16__sync.sql", "V17__sync_blobs.sql", "V18__drive_trash.sql", "V19__drive_file_state.sql")) {
+            for (m in listOf("V16__sync.sql", "V17__sync_blobs.sql", "V18__drive_trash.sql", "V19__drive_file_state.sql", "V21__drive_annotations.sql")) {
                 db.sql(File("src/main/resources/db/migration/$m").readText().replace("create table", "create table if not exists").replace("create index", "create index if not exists")).await()
             }
             dav.makeFolders("$scratch/inner")

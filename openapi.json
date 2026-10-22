@@ -34,6 +34,21 @@
         "required" : [ "items" ],
         "type" : "object"
       },
+      "Annotation" : {
+        "properties" : {
+          "copy" : {
+            "type" : "string"
+          },
+          "source" : {
+            "type" : "string"
+          },
+          "sourceChanged" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "copy", "source", "sourceChanged" ],
+        "type" : "object"
+      },
       "AttachmentInfo" : {
         "properties" : {
           "contentType" : {
@@ -1855,6 +1870,98 @@
                 }
               }
             },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/annotate" : {
+      "post" : {
+        "operationId" : "annotate",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Annotation"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/annotation" : {
+      "get" : {
+        "operationId" : "annotation",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Annotation"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/annotation/carry" : {
+      "post" : {
+        "operationId" : "carryAnnotation",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : { },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/annotation/dismiss" : {
+      "post" : {
+        "operationId" : "dismissAnnotation",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : { },
             "description" : "OK"
           }
         },

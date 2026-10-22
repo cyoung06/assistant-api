@@ -1,6 +1,8 @@
 package com.syeyoung.assistant.sync
 
 import com.syeyoung.assistant.config.AppProperties
+import com.syeyoung.assistant.core.NotebookDoc
+import com.syeyoung.assistant.core.NotebookEdit
 import com.syeyoung.assistant.drive.DriveService
 import com.syeyoung.assistant.drive.WebDav
 import jakarta.annotation.PreDestroy
@@ -103,6 +105,30 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
             room.peers.forEach { if (awareness || it !== peer) it.send(out) }
         }
         if (got.changed) later(room)
+    }
+
+    /**
+     * Changes the notebook at [path] here, as a device would: [make] gives the edits for its document
+     * as it is (none: nothing changes). They go to the devices on it, and the file is written. False
+     * if there's no such notebook.
+     */
+    suspend fun editNotebook(path: String, make: suspend (NotebookDoc) -> List<NotebookEdit>): Boolean {
+        val self = Peer { }
+        val room = join(path, self) ?: return false
+        try {
+            val notebook = room.live as? LiveNotebook ?: error("not a notebook")
+            val out = room.lock.withLock {
+                val edits = make(notebook.doc)
+                if (edits.isEmpty()) null else withContext(Dispatchers.Default) { notebook.doc.edit(edits) }
+            } ?: return true
+            room.peers.forEach { if (it !== self) it.send(out) }
+            room.dirty = true
+        } finally {
+            // The last one on it: written now.
+            leave(room, self)
+        }
+        if (room.peers.isNotEmpty()) later(room)
+        return true
     }
 
     /**
@@ -241,7 +267,7 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
     }
 
     /** The file's bytes and version; null if it isn't there. */
-    private suspend fun read(path: String): Pair<ByteArray, String?>? {
+    internal suspend fun read(path: String): Pair<ByteArray, String?>? {
         val r = dav.get(path) ?: return null
         val joined = DataBufferUtils.join(r.body ?: Flux.empty()).awaitSingleOrNull()
         val bytes = joined?.let { b -> ByteArray(b.readableByteCount()).also { b.read(it); DataBufferUtils.release(b) } } ?: ByteArray(0)
