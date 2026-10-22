@@ -1247,6 +1247,15 @@
         },
         "type" : "object"
       },
+      "SyncEpoch" : {
+        "properties" : {
+          "epoch" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      },
       "SyncReport" : {
         "properties" : {
           "completed" : {
@@ -3509,6 +3518,32 @@
           }
         },
         "tags" : [ "blobs-controller" ]
+      }
+    },
+    "/api/v1/sync/epoch" : {
+      "get" : {
+        "operationId" : "epoch",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "doc",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SyncEpoch"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "sync-controller" ]
       }
     },
     "/api/v1/tasks" : {

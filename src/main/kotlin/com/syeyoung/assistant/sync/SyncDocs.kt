@@ -260,6 +260,13 @@ class SyncDocs(private val dav: WebDav, private val props: AppProperties, privat
             .fetch().awaitRowsUpdated()
     }
 
+    /**
+     * Which document [path]'s live state is (made with it, kept when it's moved); null if there's none
+     * (never opened live, or deleted since). A device's copy of another one isn't merged into it.
+     */
+    suspend fun epoch(path: String): java.util.UUID? =
+        db.sql("select epoch from sync_docs where path = :path").bind("path", path).map { r -> r.get("epoch", java.util.UUID::class.java)!! }.awaitOneOrNull()
+
     private suspend fun forget(path: String) {
         db.sql("delete from sync_docs where path = :path").bind("path", path).fetch().awaitRowsUpdated()
     }
