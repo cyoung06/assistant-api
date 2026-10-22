@@ -2396,6 +2396,40 @@
         "tags" : [ "drive-controller" ]
       }
     },
+    "/api/v1/drive/photo" : {
+      "post" : {
+        "operationId" : "photo",
+        "requestBody" : {
+          "content" : {
+            "multipart/form-data" : {
+              "schema" : {
+                "properties" : {
+                  "file" : {
+                    "format" : "binary",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "file" ],
+                "type" : "object"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Shared"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-share-controller" ]
+      }
+    },
     "/api/v1/drive/projects/{id}" : {
       "get" : {
         "operationId" : "projectFolder",

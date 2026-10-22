@@ -72,7 +72,13 @@ class DriveShareLiveTest {
         assertTrue(note.paths[0].startsWith("${scratch}Notes/") && note.paths[0].endsWith(".md"), note.paths[0])
         assertEquals("${scratch}Notes/attachments/board.png", note.paths[1])
         assertEquals("# Lecture board\n\nSee https://x.org\n\n![board.png](attachments/board.png)\n\n", read(note.paths[0]))
-        // Text alone, even asked as a file: a note.
+        // A photo for a class: by the time and the class.
+        val first = share.photoInto(scratch, byteArrayOf(1), "image/jpeg", "확률및통계")
+        assertTrue(Regex("""^\Q$scratch\E\d{4}-\d\d-\d\d \d\d\.\d\d 확률및통계\.jpg$""").matches(first), first)
+        val second = share.photoInto(scratch, byteArrayOf(2), "image/jpeg", "확률및통계")
+        // Not over the first (numbered, or a minute later).
+        assertTrue(second != first, second)
+                // Text alone, even asked as a file: a note.
         assertTrue(share.shareInto(scratch, ShareRequest("file", text = "just a link")).paths.single().endsWith(".md"))
     }
 }

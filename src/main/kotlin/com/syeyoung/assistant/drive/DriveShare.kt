@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import kotlinx.coroutines.reactor.awaitSingle
 import reactor.core.publisher.Flux
 import java.time.Clock
 import java.time.OffsetDateTime
@@ -57,6 +58,23 @@ class DriveShare(private val dav: WebDav, private val drive: DriveService, priva
         return Shared(listOf(note) + beside.map { it.first })
     }
 
+    /**
+     * A photo (of a whiteboard, a handout) for the class on now: into its project's folder (No
+     * project's, between classes), named by the time and the class, as taken.
+     */
+    suspend fun photo(bytes: ByteArray, type: String, project: com.syeyoung.assistant.tasks.ProjectResponse?): String {
+        check(drive.enabled) { "The drive isn't set up" }
+        return photoInto(project?.let { drive.folderOf(it.id) } ?: "${DriveService.PROJECTS}/${DriveService.NO_PROJECT}/", bytes, type, project?.name)
+    }
+
+    /** The photo into [folder], named by the time and [course]. */
+    internal suspend fun photoInto(folder: String, bytes: ByteArray, type: String, course: String?): String {
+        val now = OffsetDateTime.now(clock.withZone(props.zone))
+        val ext = when (type) { "image/png" -> "png"; "image/heic" -> "heic"; "image/webp" -> "webp"; else -> "jpg" }
+        val name = listOfNotNull(now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm")), course).joinToString(" ") + ".$ext"
+        return put(folder, name, bytes, type)
+    }
+
     /** [bytes] written as [name] in [folder] (numbered if that's taken); where it went. */
     private suspend fun put(folder: String, name: String, bytes: ByteArray, type: String): String {
         dav.makeFolders(folder)
@@ -72,7 +90,18 @@ class DriveShare(private val dav: WebDav, private val drive: DriveService, priva
 
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveShareController(private val share: DriveShare) {
+class DriveShareController(private val share: DriveShare, private val today: com.syeyoung.assistant.today.TodayService) {
+    /** A photo (multipart field `file`) for the class on now: into its project's folder, named by the time and the class. */
+    @PostMapping("/photo", consumes = [org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE])
+    suspend fun photo(@org.springframework.web.bind.annotation.RequestPart("file") file: org.springframework.http.codec.multipart.FilePart): Shared {
+        val buffer = org.springframework.core.io.buffer.DataBufferUtils.join(file.content(), 40 shl 20).awaitSingle()
+        val bytes = ByteArray(buffer.readableByteCount()).also { buffer.read(it) }
+        org.springframework.core.io.buffer.DataBufferUtils.release(buffer)
+        if (bytes.isEmpty()) throw ValidationException("The photo is empty")
+        val type = file.headers().contentType?.toString() ?: "image/jpeg"
+        return Shared(listOf(share.photo(bytes, type, today.currentProject())))
+    }
+
     /** Puts what was shared into a project: its files into its folder, or a note in its Notes (see [ShareRequest]). */
     @PostMapping("/share")
     suspend fun share(@RequestBody request: ShareRequest): Shared = share.share(request)
