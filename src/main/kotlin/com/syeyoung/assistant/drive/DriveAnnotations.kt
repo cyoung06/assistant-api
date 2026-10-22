@@ -62,7 +62,8 @@ class DriveAnnotations(private val dav: WebDav, private val db: DatabaseClient, 
     private suspend fun latestCopyOf(source: String): Annotation? {
         val rows = db.sql("select copy_path, source_etag from drive_annotations where source_path = :s order by created_at desc")
             .bind("s", source).map { r -> r.get("copy_path", String::class.java)!! to r.get("source_etag", String::class.java) }.flow().toList()
-        for ((copy, etag) in rows) if (dav.exists(copy)) return Annotation(copy, source, changed(source, etag))
+        // One in the trash isn't written on any more (put back, it is again).
+        for ((copy, etag) in rows) if (!copy.startsWith("${DriveTrash.TRASH}/") && dav.exists(copy)) return Annotation(copy, source, changed(source, etag))
         return null
     }
 
