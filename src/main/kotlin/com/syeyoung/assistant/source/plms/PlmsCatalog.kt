@@ -172,6 +172,9 @@ class PlmsCatalog(
         private val POST_DATE = Regex("""<span title="(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})">""")
 
         /** Visible text of an HTML fragment. */
+        private val LIST = setOf("목록", "List")
+        private val HEADS = setOf("번호", "No", "No.")
+
         /** How far back a board's posts go into Triage. */
         private val ANNOUNCE_WITHIN: java.time.Duration = java.time.Duration.ofDays(3)
 
@@ -182,10 +185,12 @@ class PlmsCatalog(
         fun postText(html: String): String {
             val main = html.substringAfter("role=\"main\"").substringAfter(">").substringBefore("<footer")
             return main.replace(Regex("(?is)<(script|style)[^>]*>.*?</\\1>"), " ")
-                .replace(Regex("(?i)<br\\s*/?>|</p>|</div>|</li>|</h\\d>"), "\n")
+                .replace(Regex("(?i)<br\\s*/?>|</p>|</div>|</li>|</h\\d>|</t[dhr]>|</a>"), "\n")
                 .replace(Regex("<[^>]+>"), " ")
                 .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
                 .lines().map { it.replace(Regex("[ \\t]+"), " ").trim() }.filter { it.isNotEmpty() }
+                // The board's list of posts under the post ("목록", then its column heads) isn't the post.
+                .let { lines -> lines.indices.firstOrNull { i -> lines[i] in LIST && lines.getOrNull(i + 1) in HEADS }?.let { lines.take(it) } ?: lines }
                 .joinToString("\n").take(6000)
         }
 
