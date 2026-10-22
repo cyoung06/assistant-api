@@ -103,13 +103,14 @@ class TodayService(
     }
 
     /**
-     * A new note ([notebook]: a notebook page) for what's on now: in the current class's project's
-     * Notes folder (No project's, between classes), named by the time, headed with the course and day.
+     * A new note ([notebook]: a notebook page) for what's on now: in [projectId]'s Notes folder, or
+     * the current class's project's (No project's, between classes), named by the time, headed with
+     * the course and day.
      */
-    suspend fun quickNote(notebook: Boolean): QuickNote {
+    suspend fun quickNote(notebook: Boolean, projectId: UUID? = null): QuickNote {
         check(drive.enabled) { "The drive isn't set up" }
         val now = OffsetDateTime.now(clock.withZone(props.zone))
-        val project = currentProject()
+        val project = if (projectId != null) tasks.project(projectId) else currentProject()
         val folder = project?.let { drive.folderOf(it.id) + "Notes/" } ?: "${DriveService.PROJECTS}/${DriveService.NO_PROJECT}/"
         dav.makeFolders(folder)
         val stem = now.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm"))
@@ -150,7 +151,11 @@ class TodayController(private val service: TodayService) {
     @GetMapping("/today")
     suspend fun today(): Today = service.today()
 
-    /** A new note, or ([kind] notebook) notebook page, in the Notes of the class on now (No project's, between classes). */
+    /**
+     * A new note, or ([kind] notebook) notebook page, in the Notes of [projectId] if given, else of
+     * the class on now (No project's, between classes).
+     */
     @PostMapping("/quick-note")
-    suspend fun quickNote(@RequestParam(defaultValue = "note") kind: String): QuickNote = service.quickNote(kind == "notebook")
+    suspend fun quickNote(@RequestParam(defaultValue = "note") kind: String, @RequestParam(required = false) projectId: UUID?): QuickNote =
+        service.quickNote(kind == "notebook", projectId)
 }

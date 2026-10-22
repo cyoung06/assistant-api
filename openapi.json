@@ -3604,6 +3604,14 @@
             "default" : "note",
             "type" : "string"
           }
+        }, {
+          "in" : "query",
+          "name" : "projectId",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "200" : {
