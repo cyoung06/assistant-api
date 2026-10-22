@@ -142,6 +142,11 @@ class DriveIndex(private val dav: WebDav, private val db: DatabaseClient, privat
             .bind("q", "%" + escape(query.trim()) + "%").bind("start", escape(query.trim().lowercase()) + "%").bind("limit", limit)
             .map(::row).flow().toList()
 
+    /** Files and notes called [name] (a note also without its .md), whatever the case. */
+    suspend fun byName(name: String): List<Indexed> =
+        db.sql("select * from drive_index where not folder and path not like '.Trash/%' and (lower(name) = lower(:n) or lower(name) = lower(:n) || '.md') order by modified desc nulls last")
+            .bind("n", name).map(::row).flow().toList()
+
     /** What the index has of [path]. */
     suspend fun get(path: String): Indexed? =
         db.sql("select * from drive_index where path = :p").bind("p", path).map(::row).flow().toList().firstOrNull()
@@ -166,6 +171,8 @@ class DriveIndex(private val dav: WebDav, private val db: DatabaseClient, privat
          */
         fun target(link: String): String {
             if (link.startsWith("drive:")) return link
+            // Mentions by name, whatever the case (they're resolved when asked about).
+            if (link.startsWith("mention:")) return link.lowercase()
             AppLinks.parse(link)?.let { t -> return if (t.kind == com.syeyoung.assistant.refs.RefKind.FILE || t.kind == com.syeyoung.assistant.refs.RefKind.NOTE) "drive:${t.id}" else "app:${t.kind.wire}:${t.id}" }
             return link
         }

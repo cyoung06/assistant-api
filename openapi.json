@@ -1207,7 +1207,7 @@
             "type" : [ "string", "null" ]
           },
           "kind" : {
-            "enum" : [ "task", "project", "event", "mail", "plms_course", "plms_file", "plms_notice", "plms_assignment", "plms_activity", "github_repo", "github_issue", "github_pr", "link" ],
+            "enum" : [ "task", "project", "event", "mail", "plms_course", "plms_file", "plms_notice", "plms_assignment", "plms_activity", "github_repo", "github_issue", "github_pr", "note", "file", "link" ],
             "type" : "string"
           },
           "title" : {
@@ -3679,6 +3679,39 @@
                     "$ref" : "#/components/schemas/Ref"
                   },
                   "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ref-controller" ]
+      }
+    },
+    "/api/v1/refs/mention" : {
+      "get" : {
+        "operationId" : "mention",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Ref"
                 }
               }
             },

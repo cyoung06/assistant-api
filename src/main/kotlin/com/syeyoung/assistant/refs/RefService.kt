@@ -32,6 +32,7 @@ class RefService(
     private val events: EventRefs,
     private val drive: DriveRefs,
     private val driveIndex: com.syeyoung.assistant.drive.DriveIndex,
+    private val mentions: Mentions,
     private val index: RefIndex,
     private val mail: MailRefs,
     private val github: GitHubRefs,
@@ -105,8 +106,19 @@ class RefService(
         val fromEvents = ws.snapshot().events.filter { linked(it.title) || linked(it.notes) }
             .map { Ref(RefKind.EVENT, plainText(it.title), AppLinks.event(base, it.uid), date = it.start) }
         val fromNotes = driveIndex.notesLinkingTo(url).map(drive::ref)
-        return fromTasks + fromEvents + fromNotes
+        // Notes mentioning it by name: those where the name means it (another thing may be called that too).
+        val self = runCatching { resolve(url) }.getOrNull()
+        val mentioning = if (self == null) emptyList() else mentions.namesOf(self).flatMap { name ->
+            driveIndex.notesLinkingTo("mention:$name").filter { note -> mentions.resolve(name, note.path)?.url?.let(::same) == same(self.url) }
+        }.map(drive::ref)
+        return (fromTasks + fromEvents + fromNotes + mentioning).distinctBy { it.url }
     }
+
+    /** What a link means, whatever host it was written with. */
+    private fun same(url: String) = com.syeyoung.assistant.drive.DriveIndex.target(url)
+
+    /** What [name], mentioned in the note at [from], is. */
+    suspend fun mention(name: String, from: String?): Ref = mentions.resolve(name, from) ?: throw com.syeyoung.assistant.common.NotFoundException("Mention", name)
 
     suspend fun refreshCatalog(): Int = catalog.refresh()
 
@@ -145,6 +157,10 @@ class RefController(private val service: RefService) {
     /** What links to [url]. */
     @GetMapping("/backlinks")
     suspend fun backlinks(@RequestParam url: String): List<Ref> = service.backlinks(url)
+
+    /** What a mention in a note (`@Name`, `@[Name]`) is: [from] is the note's drive path, so its own project's things come first. */
+    @GetMapping("/mention")
+    suspend fun mention(@RequestParam name: String, @RequestParam(required = false) from: String?): Ref = service.mention(name, from)
 
     /** Lists PLMS course files and board posts now instead of at the next scheduled refresh. */
     @PostMapping("/plms/refresh")
