@@ -1272,6 +1272,43 @@
         },
         "type" : "object"
       },
+      "ShareRequest" : {
+        "properties" : {
+          "attachmentIds" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "projectId" : {
+            "format" : "uuid",
+            "type" : [ "string", "null" ]
+          },
+          "text" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "Shared" : {
+        "properties" : {
+          "paths" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "paths" ],
+        "type" : "object"
+      },
       "SkippedOccurrence" : {
         "properties" : {
           "date" : {
@@ -2423,6 +2460,34 @@
           }
         },
         "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/share" : {
+      "post" : {
+        "operationId" : "share",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ShareRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Shared"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-share-controller" ]
       }
     },
     "/api/v1/drive/starred" : {
