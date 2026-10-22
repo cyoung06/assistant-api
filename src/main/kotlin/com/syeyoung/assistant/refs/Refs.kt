@@ -9,6 +9,8 @@ enum class RefKind(@get:JsonValue val wire: String) {
     TASK("task"), PROJECT("project"), EVENT("event"), MAIL("mail"),
     PLMS_COURSE("plms_course"), PLMS_FILE("plms_file"), PLMS_NOTICE("plms_notice"), PLMS_ASSIGNMENT("plms_assignment"), PLMS_ACTIVITY("plms_activity"),
     GITHUB_REPO("github_repo"), GITHUB_ISSUE("github_issue"), GITHUB_PR("github_pr"),
+    /** A note in the drive, and any other file there. */
+    NOTE("note"), FILE("file"),
     LINK("link");
 
     companion object {
@@ -47,6 +49,10 @@ object AppLinks {
     fun project(base: String, id: Any) = "${base.trimEnd('/')}/tasks/project/$id"
     fun event(base: String, uid: String) = "${base.trimEnd('/')}/event/${URLEncoder.encode(uid, Charsets.UTF_8)}"
 
+    /** A drive file's page in the app (Files, showing it): `<base>/files/<path under Projects/>`, each part escaped. */
+    fun file(base: String, path: String) =
+        "${base.trimEnd('/')}/files/" + path.removePrefix("Projects/").split('/').joinToString("/") { URLEncoder.encode(it, Charsets.UTF_8).replace("+", "%20") }
+
     /** RFC 2392: the Message-ID without angle brackets, escaped except for its @. */
     fun mail(messageId: String) = "mid:" + URLEncoder.encode(messageId.trim().removePrefix("<").removeSuffix(">"), Charsets.UTF_8).replace("%40", "@")
 
@@ -54,10 +60,16 @@ object AppLinks {
     fun mailPage(base: String, messageId: String) = "${base.trimEnd('/')}/mail/${URLEncoder.encode(messageId, Charsets.UTF_8)}"
 
     private val PATTERN = Regex("""[/#](task|tasks/project|event|mail)/([^\s)#?]+)""")
+    private val FILE_PATTERN = Regex("""^(?:https?://[^/]+)?/files/([^\s)#?]+)""")
 
     fun parse(url: String): Target? {
         if (url.startsWith("mid:")) return Target(RefKind.MAIL, URLDecoder.decode(url.removePrefix("mid:"), Charsets.UTF_8))
         if (!url.startsWith("http") && !url.startsWith("#") && !url.startsWith("/")) return null
+        // A drive file's page: its path (a note or another file), whatever the folders in it are called.
+        FILE_PATTERN.find(url)?.let { m ->
+            val path = "Projects/" + m.groupValues[1].split('/').joinToString("/") { URLDecoder.decode(it.replace("+", "%2B"), Charsets.UTF_8) }
+            return Target(if (Regex("""\.(md|markdown)$""", RegexOption.IGNORE_CASE).containsMatchIn(path)) RefKind.NOTE else RefKind.FILE, path)
+        }
         val m = PATTERN.find(url) ?: return null
         val id = URLDecoder.decode(m.groupValues[2], Charsets.UTF_8)
         val kind = when (m.groupValues[1]) {

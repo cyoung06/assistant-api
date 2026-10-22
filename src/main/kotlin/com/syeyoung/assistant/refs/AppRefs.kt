@@ -55,3 +55,25 @@ class EventRefs(private val ws: Workspace, props: AppProperties) : RefProvider {
         return Ref(RefKind.EVENT, plainText(e.title), AppLinks.event(base, e.uid), date = e.start ?: e.startDate?.atStartOfDay(ws.zone)?.toInstant())
     }
 }
+
+/** Notes and files in the drive, by name (as the drive was last walked; see [DriveIndex]). */
+@Component
+class DriveRefs(private val index: com.syeyoung.assistant.drive.DriveIndex, props: AppProperties) : RefProvider {
+    private val base = props.publicUrl
+
+    override suspend fun search(query: String, limit: Int): List<Ref> =
+        if (query.isBlank()) emptyList() else index.search(query, limit).filter { !it.path.startsWith(".Trash/") }.map(::ref)
+
+    override suspend fun resolve(url: String): Ref? {
+        val target = AppLinks.parse(url)?.takeIf { it.kind == RefKind.NOTE || it.kind == RefKind.FILE } ?: return null
+        return index.get(target.id)?.let(::ref) ?: Ref(target.kind, target.id.substringAfterLast('/'), AppLinks.file(base, target.id), projectOf(target.id))
+    }
+
+    /** What a note or file is, as a reference: its name (a note's without .md), in its project. */
+    fun ref(i: com.syeyoung.assistant.drive.Indexed): Ref {
+        val note = Regex("""\.(md|markdown)$""", RegexOption.IGNORE_CASE).containsMatchIn(i.name)
+        return Ref(if (note) RefKind.NOTE else RefKind.FILE, if (note) i.name.substringBeforeLast('.') else i.name, AppLinks.file(base, i.path), projectOf(i.path), i.modified)
+    }
+
+    private fun projectOf(path: String) = path.split('/').getOrNull(1)
+}

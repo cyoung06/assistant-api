@@ -30,6 +30,8 @@ import java.net.URI
 class RefService(
     private val tasks: TaskRefs,
     private val events: EventRefs,
+    private val drive: DriveRefs,
+    private val driveIndex: com.syeyoung.assistant.drive.DriveIndex,
     private val index: RefIndex,
     private val mail: MailRefs,
     private val github: GitHubRefs,
@@ -47,7 +49,7 @@ class RefService(
 
     /** Everything matching [query], from every provider at once; mail gets a few seconds at most. */
     suspend fun search(query: String, limit: Int): List<Ref> = coroutineScope {
-        val providers = listOf(tasks to 2_000L, events to 2_000L, index to 2_000L, mail to 4_000L, github to 3_000L)
+        val providers = listOf(tasks to 2_000L, events to 2_000L, drive to 2_000L, index to 2_000L, mail to 4_000L, github to 3_000L)
         val results = providers.map { (p, timeout) ->
             async {
                 withTimeoutOrNull(timeout) { runCatching { p.search(query, limit) }.onFailure { log.debug("ref search failed: {}", it.toString()) }.getOrNull() }.orEmpty()
@@ -71,6 +73,7 @@ class RefService(
             val provider: RefProvider = when (target.kind) {
                 RefKind.MAIL -> mail
                 RefKind.EVENT -> events
+                RefKind.NOTE, RefKind.FILE -> drive
                 else -> tasks
             }
             provider.resolve(link)?.let { return it }
@@ -88,7 +91,7 @@ class RefService(
         return Ref(RefKind.LINK, unfurl(uri) ?: uri.host + uri.path.takeIf { it.length > 1 }.orEmpty(), link, uri.host)
     }
 
-    /** Tasks and events whose title, description or notes link to [url]. */
+    /** Tasks and events whose title, description or notes link to [url], and notes in the drive that do. */
     suspend fun backlinks(url: String): List<Ref> {
         val target = AppLinks.parse(url)
         // Our own links are matched by their path (or old #fragment), so a different host in the text still counts.
@@ -101,7 +104,8 @@ class RefService(
             .map { Ref(RefKind.TASK, "#${it.number} ${plainText(it.title)}", AppLinks.task(base, it.id), date = it.updatedAt) }
         val fromEvents = ws.snapshot().events.filter { linked(it.title) || linked(it.notes) }
             .map { Ref(RefKind.EVENT, plainText(it.title), AppLinks.event(base, it.uid), date = it.start) }
-        return fromTasks + fromEvents
+        val fromNotes = driveIndex.notesLinkingTo(url).map(drive::ref)
+        return fromTasks + fromEvents + fromNotes
     }
 
     suspend fun refreshCatalog(): Int = catalog.refresh()
