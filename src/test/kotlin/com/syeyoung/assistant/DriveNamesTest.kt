@@ -1,6 +1,7 @@
 package com.syeyoung.assistant
 
 import com.syeyoung.assistant.drive.DriveService
+import com.syeyoung.assistant.drive.naturalOrder
 import com.syeyoung.assistant.source.plms.PlmsFiles
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -19,5 +20,14 @@ class DriveNamesTest {
         val at = Instant.parse("2026-10-21T03:00:00Z")
         assertEquals("Lecture 3 (updated 2026-10-21).pdf", PlmsFiles.updatedName("Lecture 3.pdf", at))
         assertEquals("README (updated 2026-10-21)", PlmsFiles.updatedName("README", at))
+    }
+
+    @Test
+    fun `names sort with their numbers in order`() {
+        val names = listOf("10. Flows.pdf", "2. Graphs.pdf", "1. Intro.pdf", "hw10.md", "HW2.md", "hw1.md", "Notes", "02. Again.pdf")
+        assertEquals(
+            listOf("1. Intro.pdf", "02. Again.pdf", "2. Graphs.pdf", "10. Flows.pdf", "hw1.md", "HW2.md", "hw10.md", "Notes"),
+            names.sortedWith(::naturalOrder),
+        )
     }
 }

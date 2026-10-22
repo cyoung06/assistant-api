@@ -65,7 +65,7 @@ class WebDav(props: AppProperties, web: WebClient.Builder) {
                 e.text("getcontenttype"),
                 version(e.text("getetag")),
             )
-        }.sortedWith(compareBy({ !it.folder }, { it.name.lowercase() }))
+        }.sortedWith(compareBy<DriveEntry> { !it.folder }.then { a, b -> naturalOrder(a.name, b.name) })
     }
 
     suspend fun exists(path: String): Boolean = propfind(path, depth = 0).status == 207
@@ -210,4 +210,23 @@ class WebDav(props: AppProperties, web: WebClient.Builder) {
         const val DAV = "DAV:"
         const val PROPFIND = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getcontenttype/><d:getetag/></d:prop></d:propfind>"""
     }
+}
+
+private val CHUNK = Regex("""\d+|\D+""")
+
+/** Names as Finder orders them: numbers by their value ("2." before "10."), the rest ignoring case. */
+internal fun naturalOrder(a: String, b: String): Int {
+    val x = CHUNK.findAll(a).map { it.value }.iterator()
+    val y = CHUNK.findAll(b).map { it.value }.iterator()
+    while (x.hasNext() && y.hasNext()) {
+        val p = x.next()
+        val q = y.next()
+        val c = if (p[0].isDigit() && q[0].isDigit()) {
+            val m = p.trimStart('0')
+            val n = q.trimStart('0')
+            if (m.length != n.length) m.length - n.length else m.compareTo(n)
+        } else p.compareTo(q, ignoreCase = true)
+        if (c != 0) return c
+    }
+    return if (x.hasNext()) 1 else if (y.hasNext()) -1 else a.compareTo(b)
 }
