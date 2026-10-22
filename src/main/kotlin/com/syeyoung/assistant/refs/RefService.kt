@@ -48,14 +48,19 @@ class RefService(
     private val plmsBase = props.sources.plms.baseUrl
     private val plmsHost = URI(plmsBase).host
 
+    /**
+     * Where providers' searches run: outside the request, so one that blocks past its time (mail's
+     * IMAP can't be cancelled while it waits on the server) finishes on its own, unwaited for.
+     */
+    private val searches = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
     /** Everything matching [query], from every provider at once; mail gets a few seconds at most. */
     suspend fun search(query: String, limit: Int): List<Ref> = coroutineScope {
         val providers = listOf(tasks to 2_000L, events to 2_000L, drive to 2_000L, index to 2_000L, mail to 4_000L, github to 3_000L)
-        val results = providers.map { (p, timeout) ->
-            async {
-                withTimeoutOrNull(timeout) { runCatching { p.search(query, limit) }.onFailure { log.debug("ref search failed: {}", it.toString()) }.getOrNull() }.orEmpty()
-            }
-        }.awaitAll().flatten()
+        val running = providers.map { (p, timeout) ->
+            searches.async { runCatching { p.search(query, limit) }.onFailure { log.debug("ref search failed: {}", it.toString()) }.getOrNull().orEmpty() } to timeout
+        }
+        val results = running.map { (search, timeout) -> async { withTimeoutOrNull(timeout) { search.await() }.orEmpty() } }.awaitAll().flatten()
         val q = query.trim().lowercase()
         // Titles starting with the query first, then the order providers gave.
         results.withIndex().sortedWith(compareBy({ !it.value.title.lowercase().removePrefix("#").startsWith(q.removePrefix("#")) }, { it.index }))
