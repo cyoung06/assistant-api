@@ -67,17 +67,22 @@ class TodayService(
                 .sortedWith(compareBy({ it.due?.date }, { it.due?.time }, { it.priority }))
         }
         val waiting = async { triage.list().sumOf { i -> if (i.status == "pending") 1 else i.items.count { it.status == "pending" } } }
+        val projects = async { tasks.projects() }
         val events = week.await()
         val todays = events.filter { e -> e.start?.toLocalDate()?.let { it <= date } ?: (e.startDate!! <= date) }
             .filter { e -> e.end?.let { it.toLocalDate() >= date } ?: (e.endDate!! >= date) }
             .sortedWith(compareBy({ it.start != null }, { it.start }))
+        // An event's project: the one it's linked to, or (a lecture added by hand, titled as its
+        // course) the project its title names.
+        val all = projects.await()
+        fun projectOf(e: EventOccurrence) = e.projectId?.let { id -> all.find { it.id == id } }
+            ?: all.filter { p -> e.title == p.name || e.title.startsWith(p.name + " ") }.maxByOrNull { it.name.length }
         // The next class: a project's event going on now or the soonest to start, this week.
-        val lecture = events.filter { it.projectId != null && it.start != null && it.end!! > now }.minByOrNull { it.start!! }
-        Today(date, lecture?.let { nextClass(it, it.projectId!!) }, todays, due.await(), waiting.await())
+        val lecture = events.filter { it.start != null && it.end!! > now }.sortedBy { it.start!! }.firstNotNullOfOrNull { e -> projectOf(e)?.let { e to it } }
+        Today(date, lecture?.let { (e, p) -> nextClass(e, p.id, p.name) }, todays, due.await(), waiting.await())
     }
 
-    private suspend fun nextClass(e: EventOccurrence, project: UUID): NextClass {
-        val name = runCatching { tasks.project(project).name }.getOrNull()
+    private suspend fun nextClass(e: EventOccurrence, project: UUID, name: String): NextClass {
         val folder = if (drive.enabled) runCatching { drive.folderOf(project) }.getOrNull() else null
         val files = folder?.let { f ->
             listOf("${f}${DriveService.COURSE_FILES}/", f).flatMap { runCatching { dav.list(it) }.getOrNull().orEmpty() }

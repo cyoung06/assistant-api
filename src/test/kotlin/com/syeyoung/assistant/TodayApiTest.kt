@@ -46,4 +46,17 @@ class TodayApiTest : ApiTestBase() {
         assertThat(patch("/api/v1/events/${lecture["id"]}", mapOf("location" to "Online"))["location"]).isEqualTo("Online")
         assertThat(patch("/api/v1/events/${lecture["id"]}", mapOf("location" to null))).doesNotContainKey("location")
     }
+
+    @Test
+    fun `a lecture added by hand counts by its title`() {
+        post("/api/v1/projects", mapOf("name" to "컴퓨터시스템 개론"))
+        post("/api/v1/projects", mapOf("name" to "컴퓨터"))
+        post("/api/v1/events", mapOf("title" to "Lunch", "start" to "2026-10-18T12:00:00+09:00", "end" to "2026-10-18T13:00:00+09:00"))
+        post("/api/v1/events", mapOf("title" to "컴퓨터시스템 개론", "start" to "2026-10-18T14:00:00+09:00", "end" to "2026-10-18T15:15:00+09:00", "location" to "LG 104"))
+        @Suppress("UNCHECKED_CAST")
+        val next = get("/api/v1/today")["next"] as Map<String, Any?>
+        assertThat((next["event"] as Map<*, *>)["title"]).isEqualTo("컴퓨터시스템 개론")
+        // The project it names in full, not one whose name only starts it.
+        assertThat(next["projectName"]).isEqualTo("컴퓨터시스템 개론")
+    }
 }
