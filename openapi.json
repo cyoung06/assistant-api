@@ -537,6 +537,55 @@
         "required" : [ "createdAt", "path" ],
         "type" : "object"
       },
+      "FileState" : {
+        "properties" : {
+          "openedAt" : {
+            "format" : "date-time",
+            "type" : [ "string", "null" ]
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "starred" : {
+            "type" : "boolean"
+          },
+          "tool" : {
+            "type" : [ "string", "null" ]
+          },
+          "zoom" : {
+            "format" : "float",
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "path" ],
+        "type" : "object"
+      },
+      "FileStateChange" : {
+        "properties" : {
+          "opened" : {
+            "type" : [ "boolean", "null" ]
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : [ "integer", "null" ]
+          },
+          "starred" : {
+            "type" : [ "boolean", "null" ]
+          },
+          "tool" : {
+            "type" : [ "string", "null" ]
+          },
+          "zoom" : {
+            "format" : "float",
+            "type" : [ "number", "null" ]
+          }
+        },
+        "type" : "object"
+      },
       "GitHubAccount" : {
         "properties" : {
           "configured" : {
@@ -2027,6 +2076,118 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/DriveFolder"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/recent" : {
+      "get" : {
+        "operationId" : "recentFiles",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/FileState"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/starred" : {
+      "get" : {
+        "operationId" : "starredFiles",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/FileState"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/state" : {
+      "get" : {
+        "operationId" : "fileState",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FileState"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      },
+      "patch" : {
+        "operationId" : "changeFileState",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FileStateChange"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FileState"
                 }
               }
             },

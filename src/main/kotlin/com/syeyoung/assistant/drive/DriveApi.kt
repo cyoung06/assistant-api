@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PutMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -40,7 +42,7 @@ private const val READ_ONLY = "Course files are kept as PLMS has them; copy one 
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash) {
+class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash, private val state: DriveFileState) {
 
     @GetMapping
     fun driveInfo() = DriveInfo(drive.enabled, props.drive.publicUrl, props.drive.username)
@@ -151,8 +153,30 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
             throw ResponseStatusException(HttpStatus.CONFLICT, "Something is already called that")
         }
         live.moved(source, target)
+        state.moved(source, target)
         return ResponseEntity.noContent().build()
     }
+
+    // ---- the person's state of files: starred, recently opened, where a PDF was left ----
+
+    /** What's kept about [path]: starred, when last opened, where a PDF was left. */
+    @GetMapping("/state")
+    suspend fun fileState(@RequestParam path: String): FileState = state.get(safePath(path))
+
+    /** Changes what's kept about [path] (what's given is set, the rest left as it is). */
+    @PatchMapping("/state")
+    suspend fun changeFileState(@RequestParam path: String, @RequestBody change: FileStateChange): FileState = state.change(safePath(path), change)
+
+    /** The files opened most recently, latest first. */
+    @GetMapping("/recent")
+    suspend fun recentFiles(@RequestParam(defaultValue = "20") limit: Int): List<FileState> = state.recent(limit.coerceIn(1, 100))
+
+    /** The starred files and folders. */
+    @GetMapping("/starred")
+    suspend fun starredFiles(): List<FileState> = state.starred()
+
+    /** A drive path as files' states keep it: a folder's with its "/". */
+    private fun safePath(path: String) = safe(path).let { if (path.endsWith("/") && it.isNotEmpty()) "$it/" else it }
 
     /**
      * Copies a file or folder (with what's in it) to [to]; if something is already called that,
