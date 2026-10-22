@@ -130,7 +130,7 @@ abstract class Cargo : DefaultTask() {
 abstract class CoreLibrary : Cargo() {
     @TaskAction
     fun build() {
-        cargo("build", "--release", "--lib")
+        cargo("build", "--release", "--lib", "--features", "print")
         val dir = output.get().asFile.resolve(jnaPrefix).apply { mkdirs() }
         crate.get().asFile.resolve("target/release/$libraryFile").copyTo(dir.resolve(libraryFile), overwrite = true)
     }
@@ -140,7 +140,7 @@ abstract class CoreLibrary : Cargo() {
 abstract class CoreBindings : Cargo() {
     @TaskAction
     fun generate() {
-        cargo("build", "--lib")
+        cargo("build", "--lib", "--features", "print")
         cargo("run", "--bin", "uniffi-bindgen", "--", "generate", "--library", "target/debug/$libraryFile", "--language", "kotlin", "--no-format", "--out-dir", output.get().asFile.path)
     }
 }
@@ -164,3 +164,6 @@ if (corePrebuilt != null) {
     kotlin.sourceSets["main"].kotlin.srcDir(coreBindings)
     sourceSets["main"].resources.srcDir(coreLibrary)
 }
+
+// The app's fonts (the core's), for exports: notes set in them, math and diagrams drawn with them.
+tasks.processResources { from("core/fonts") { into("fonts") } }

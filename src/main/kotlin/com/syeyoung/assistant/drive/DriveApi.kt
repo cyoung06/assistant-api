@@ -42,7 +42,7 @@ private const val READ_ONLY = "Course files are kept as PLMS has them; copy one 
 /** The drive: what's in a project's folder, and reading and writing its files. */
 @RestController
 @RequestMapping("/api/v1/drive")
-class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash, private val state: DriveFileState, private val annotations: DriveAnnotations) {
+class DriveController(private val drive: DriveService, private val dav: WebDav, private val thumbs: DriveThumbs, private val props: AppProperties, private val live: SyncDocs, private val trash: DriveTrash, private val state: DriveFileState, private val annotations: DriveAnnotations, private val exports: DriveExport) {
 
     @GetMapping
     fun driveInfo() = DriveInfo(drive.enabled, props.drive.publicUrl, props.drive.username)
@@ -175,6 +175,42 @@ class DriveController(private val drive: DriveService, private val dav: WebDav, 
     /** The starred files and folders. */
     @GetMapping("/starred")
     suspend fun starredFiles(): List<FileState> = state.starred()
+
+    // ---- exports: notebooks, PDFs and notes as one PDF, to hand in (see [DriveExport]) ----
+
+    /** [request]'s files as one PDF, to download. */
+    @PostMapping("/export", produces = ["application/pdf"])
+    suspend fun export(@RequestBody request: ExportRequest): ResponseEntity<ByteArray> {
+        val pdf = exported(request)
+        val name = (request.cover?.title?.takeIf { it.isNotBlank() } ?: request.items.first().path.substringAfterLast('/').substringBeforeLast('.')) + ".pdf"
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, org.springframework.http.ContentDisposition.attachment().filename(DriveService.safeName(name), Charsets.UTF_8).build().toString())
+            .contentType(MediaType.APPLICATION_PDF)
+            .body(pdf)
+    }
+
+    /** [request]'s files as one PDF, saved in the drive at [to] (numbered if that's taken); where it went. */
+    @PostMapping("/export/save")
+    suspend fun exportToDrive(@RequestParam to: String, @RequestBody request: ExportRequest): DriveCopied {
+        var target = editable(to)
+        val pdf = exported(request)
+        val (stem, ext) = target.substringBeforeLast('.') to ".pdf"
+        var n = 2
+        while (dav.exists(target)) target = "$stem ($n)$ext".also { n++ }
+        dav.makeFolders(target.substringBeforeLast('/', ""))
+        dav.put(target, Flux.just(org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance.wrap(pdf)), pdf.size.toLong(), "application/pdf", absent = true)
+        return DriveCopied(target)
+    }
+
+    private suspend fun exported(request: ExportRequest): ByteArray {
+        requireEnabled()
+        val items = request.items.map { it.copy(path = safe(it.path)) }
+        try {
+            return exports.export(request.copy(items = items))
+        } catch (e: IllegalArgumentException) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
+        }
+    }
 
     // ---- course files written on in a copy (see [DriveAnnotations]) ----
 

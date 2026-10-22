@@ -539,6 +539,59 @@
         "required" : [ "calendarId", "calendarName", "categories", "fixed", "id", "notes", "repeats", "title" ],
         "type" : "object"
       },
+      "ExportCover" : {
+        "properties" : {
+          "author" : {
+            "type" : [ "string", "null" ]
+          },
+          "date" : {
+            "type" : [ "string", "null" ]
+          },
+          "subtitle" : {
+            "type" : [ "string", "null" ]
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "title" ],
+        "type" : "object"
+      },
+      "ExportItem" : {
+        "properties" : {
+          "pages" : {
+            "items" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "type" : [ "array", "null" ]
+          },
+          "path" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "path" ],
+        "type" : "object"
+      },
+      "ExportRequest" : {
+        "properties" : {
+          "cover" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/ExportCover"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ExportItem"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [ "items" ],
+        "type" : "object"
+      },
       "FeedInfo" : {
         "properties" : {
           "createdAt" : {
@@ -1986,6 +2039,71 @@
             "type" : "string"
           }
         } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DriveCopied"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/export" : {
+      "post" : {
+        "operationId" : "export",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/pdf" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "drive-controller" ]
+      }
+    },
+    "/api/v1/drive/export/save" : {
+      "post" : {
+        "operationId" : "exportToDrive",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "to",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {

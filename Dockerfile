@@ -3,7 +3,8 @@
 FROM rust:1.99.1-slim-bookworm AS core
 WORKDIR /core
 COPY core/ ./
-RUN cargo build --release --lib && cargo build --lib \
+# With print: notes typeset into PDF pages (Typst, as a library), for exports.
+RUN cargo build --release --lib --features print && cargo build --lib --features print \
  && cargo run --bin uniffi-bindgen -- generate --library target/debug/libassistant_core.so --language kotlin --no-format --out-dir /out/kotlin \
  && mkdir -p /out/native/linux-x86-64 && cp target/release/libassistant_core.so /out/native/linux-x86-64/
 
@@ -15,6 +16,7 @@ COPY gradle gradle
 # Dependencies first, so they stay cached while only sources change.
 RUN ./gradlew --no-daemon -q -PcorePrebuilt=/core dependencies > /dev/null
 COPY --from=core /out /core
+COPY core/fonts core/fonts
 COPY src/main src/main
 RUN ./gradlew --no-daemon -q -PcorePrebuilt=/core bootJar \
  && java -Djarmode=tools -jar build/libs/*.jar extract --layers --launcher --destination /app
