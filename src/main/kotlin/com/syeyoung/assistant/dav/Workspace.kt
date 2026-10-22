@@ -48,6 +48,8 @@ data class Event(
     val sourceRef: String?,
     /** The project it belongs to (e.g. a course's lectures or exam), kept in [Workspace.PROJECT_PROP]. */
     val projectId: String? = null,
+    /** Where it is (a lecture's room): LOCATION, as every calendar app shows and edits it. */
+    val location: String? = null,
 )
 
 /** One concrete occurrence of an event within a range. */
@@ -116,6 +118,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
             url = c.value("URL"),
             sourceRef = c.value(SOURCE_PROP),
             projectId = c.value(PROJECT_PROP),
+            location = c.text("LOCATION")?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -185,6 +188,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         val rrule: String? = null,
         val exdates: List<LocalDate> = emptyList(),
         val projectId: String? = null,
+        val location: String? = null,
     )
 
     suspend fun createEvent(calendarId: String, f: EventFields, uid: String = newUid()): Event {
@@ -246,6 +250,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         c.set("LAST-MODIFIED", utc(now))
         setTitle(c, f.title)
         c.setText("DESCRIPTION", f.notes.ifBlank { null })
+        c.setText("LOCATION", f.location?.ifBlank { null })
         if (f.startDate != null) {
             c.set("DTSTART", DATE.format(f.startDate), mapOf("VALUE" to "DATE"))
             c.set("DTEND", DATE.format((f.endDate ?: f.startDate).plusDays(1)), mapOf("VALUE" to "DATE"))
@@ -275,6 +280,7 @@ class Workspace(private val dav: CalDav, private val clock: Clock, props: AppPro
         e.title, e.notes, e.start, e.end, e.startDate, e.endDate, e.categories, e.url, e.sourceRef,
         rrule = c.value("RRULE"),
         projectId = e.projectId,
+        location = e.location,
         exdates = c.all("EXDATE").flatMap { p -> p.value.split(',').mapNotNull { v -> dateOf(IcsDocument.Prop("EXDATE", p.params, v)) ?: instantOf(IcsDocument.Prop("EXDATE", p.params, v))?.atZone(zone)?.toLocalDate() } },
     )
 

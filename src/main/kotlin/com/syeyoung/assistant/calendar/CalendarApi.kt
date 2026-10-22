@@ -70,6 +70,8 @@ data class EventOccurrence(
     /** From a source (e.g. holidays): can't be changed here. */
     val fixed: Boolean,
     val projectId: UUID? = null,
+    /** Where it is (a lecture's room). */
+    val location: String? = null,
     val start: OffsetDateTime? = null,
     val end: OffsetDateTime? = null,
     val startDate: LocalDate? = null,
@@ -92,6 +94,7 @@ data class EventResponse(
     val repeat: RepeatDto? = null,
     val url: String? = null,
     val projectId: UUID? = null,
+    val location: String? = null,
     val start: OffsetDateTime? = null,
     val end: OffsetDateTime? = null,
     val startDate: LocalDate? = null,
@@ -109,6 +112,7 @@ data class CreateEventRequest(
     val categories: List<String> = emptyList(),
     val repeat: RepeatDto? = null,
     val projectId: UUID? = null,
+    val location: String? = null,
 )
 
 /** A repeating event of a project in one line's worth: e.g. Tue · Thu 12:30–13:45. */
@@ -172,7 +176,7 @@ class CalendarService(
             EventOccurrence(
                 id = o.event.uid, title = o.event.title, calendarId = o.event.calendarId, calendarName = cal?.name.orEmpty(), color = cal?.color,
                 categories = o.event.categories, repeats = o.event.repeats, fixed = o.event.calendarId in fixed,
-                projectId = o.event.projectId?.let(::uuidOrNull),
+                projectId = o.event.projectId?.let(::uuidOrNull), location = o.event.location,
                 start = o.start?.atZone(zone)?.toOffsetDateTime(), end = o.end?.atZone(zone)?.toOffsetDateTime(),
                 startDate = o.startDate, endDate = o.endDate,
             )
@@ -188,7 +192,7 @@ class CalendarService(
             id = e.uid, title = e.title, notes = e.notes, calendarId = e.calendarId, calendarName = cal?.name.orEmpty(), color = cal?.color,
             categories = e.categories, fixed = e.calendarId in sources.sourceCalendarIds(), repeats = e.repeats,
             repeat = rule?.value("RRULE")?.let { r -> toRepeat(r, ws.fieldsOf(e, rule).exdates) }, url = e.url,
-            projectId = e.projectId?.let(::uuidOrNull),
+            projectId = e.projectId?.let(::uuidOrNull), location = e.location,
             start = e.start?.atZone(zone)?.toOffsetDateTime(), end = e.end?.atZone(zone)?.toOffsetDateTime(),
             startDate = e.startDate, endDate = e.endDate,
         )
@@ -198,14 +202,14 @@ class CalendarService(
     suspend fun create(req: CreateEventRequest): EventResponse {
         val title = req.title.trim().ifEmpty { throw ValidationException("Title is required") }
         req.projectId?.let { checkProject(it) }
-        var f = Workspace.EventFields(title, req.notes, categories = req.categories, projectId = req.projectId?.toString())
+        var f = Workspace.EventFields(title, req.notes, categories = req.categories, projectId = req.projectId?.toString(), location = req.location?.trim()?.ifEmpty { null })
         f = withTime(f, req.start, req.end, req.startDate, req.endDate)
         req.repeat?.let { f = withRepeat(f, it) }
         return event(ws.createEvent(ws.assistantCalendar().id, f).uid)
     }
 
     /**
-     * Merge patch: title, notes, categories, start+end or startDate+endDate (for a repeating event,
+     * Merge patch: title, notes, location, categories, start+end or startDate+endDate (for a repeating event,
      * the first occurrence), repeat (null stops repeating), projectId (null unlinks).
      */
     suspend fun update(id: String, patch: JsonNode): EventResponse {
@@ -213,7 +217,7 @@ class CalendarService(
         val e = editable(id)
         fun date(name: String) = patch.get(name)?.takeUnless { it.isNull }?.let { mapper.treeToValue(it, LocalDate::class.java) }
         fun time(name: String) = patch.get(name)?.takeUnless { it.isNull }?.let { mapper.treeToValue(it, OffsetDateTime::class.java) }
-        val known = setOf("title", "notes", "categories", "start", "end", "startDate", "endDate", "repeat", "projectId")
+        val known = setOf("title", "notes", "location", "categories", "start", "end", "startDate", "endDate", "repeat", "projectId")
         patch.properties().map { it.key }.find { it !in known }?.let { throw ValidationException("Unknown field '$it'") }
         val project = patch.get("projectId")?.takeUnless { it.isNull }?.asString()
             ?.let { uuidOrNull(it) ?: throw ValidationException("Not an ID: '$it'") }?.also { checkProject(it) }
@@ -222,6 +226,7 @@ class CalendarService(
                 var f = current
                 patch.get("title")?.let { f = f.copy(title = it.asString().trim().ifEmpty { throw ValidationException("Title is required") }) }
                 patch.get("notes")?.let { f = f.copy(notes = it.takeUnless { n -> n.isNull }?.asString().orEmpty()) }
+                patch.get("location")?.let { f = f.copy(location = it.takeUnless { n -> n.isNull }?.asString()?.trim()?.ifEmpty { null }) }
                 patch.get("categories")?.let { n -> f = f.copy(categories = (0 until n.size()).map { n.get(it).asString() }) }
                 if (patch.has("projectId")) f = f.copy(projectId = project?.toString())
                 if (patch.has("start") || patch.has("startDate")) f = withTime(f, time("start"), time("end"), date("startDate"), date("endDate"))

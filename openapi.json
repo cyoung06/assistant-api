@@ -164,6 +164,9 @@
             "format" : "date",
             "type" : [ "string", "null" ]
           },
+          "location" : {
+            "type" : [ "string", "null" ]
+          },
           "notes" : {
             "type" : "string"
           },
@@ -451,6 +454,9 @@
           "id" : {
             "type" : "string"
           },
+          "location" : {
+            "type" : [ "string", "null" ]
+          },
           "projectId" : {
             "format" : "uuid",
             "type" : [ "string", "null" ]
@@ -503,6 +509,9 @@
           },
           "id" : {
             "type" : "string"
+          },
+          "location" : {
+            "type" : [ "string", "null" ]
           },
           "notes" : {
             "type" : "string"
@@ -948,6 +957,27 @@
           }
         },
         "required" : [ "id", "name", "token" ],
+        "type" : "object"
+      },
+      "NextClass" : {
+        "properties" : {
+          "event" : {
+            "$ref" : "#/components/schemas/EventOccurrence"
+          },
+          "files" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DriveEntry"
+            },
+            "type" : "array"
+          },
+          "folder" : {
+            "type" : [ "string", "null" ]
+          },
+          "projectName" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "event", "files" ],
         "type" : "object"
       },
       "ParsedMail" : {
@@ -1470,6 +1500,39 @@
           }
         },
         "required" : [ "attachments", "blocked", "createdAt", "description", "id", "labelIds", "number", "overdue", "priority", "relations", "status", "subtasks", "subtasksDone", "title", "updatedAt", "version" ],
+        "type" : "object"
+      },
+      "Today" : {
+        "properties" : {
+          "date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "due" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TaskResponse"
+            },
+            "type" : "array"
+          },
+          "events" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EventOccurrence"
+            },
+            "type" : "array"
+          },
+          "next" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/NextClass"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "triage" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "date", "due", "events", "triage" ],
         "type" : "object"
       },
       "TokenInfo" : {
@@ -4039,6 +4102,24 @@
           }
         },
         "tags" : [ "task-controller" ]
+      }
+    },
+    "/api/v1/today" : {
+      "get" : {
+        "operationId" : "today",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Today"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "today-controller" ]
       }
     },
     "/api/v1/triage" : {
