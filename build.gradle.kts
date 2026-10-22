@@ -73,6 +73,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
     // An in-memory IMAP server for the mail source's tests.
     testImplementation("com.icegreen:greenmail:2.1.14")
+    // Reading Noteshelf's backups (plists, SQLite) for the one-time import (NoteshelfImport.kt).
+    testImplementation("com.googlecode.plist:dd-plist:1.28")
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -90,6 +93,13 @@ tasks.jar {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// Noteshelf's backups as our notebooks, once: ./gradlew noteshelfImport -Pfrom=<folder> -Pto=<folder>.
+tasks.register<JavaExec>("noteshelfImport") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.syeyoung.assistant.NoteshelfImportKt")
+    args(providers.gradleProperty("from").getOrElse(""), providers.gradleProperty("to").getOrElse(""))
 }
 
 // The shared core (assistant-core, the core/ submodule), built with cargo for the machine this
