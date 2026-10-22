@@ -41,6 +41,7 @@ class PlmsCatalog(
     private val clock: Clock,
     private val props: AppProperties,
     private val files: PlmsFiles,
+    private val triage: com.syeyoung.assistant.triage.TriageService,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -90,10 +91,26 @@ class PlmsCatalog(
             }
         }
         index.replace(SOURCE, refs, Instant.now(clock))
+        announce(refs.filter { it.kind == RefKind.PLMS_NOTICE })
         // Course files into the courses' project folders (in the background: videos take a while).
         files.importLater(courses.map { it.path("id").asLong() to PlmsSource.courseName(it.path("fullname").asString("")) })
         log.info("PLMS catalog: {} references", refs.size)
         return refs.size
+    }
+
+    /**
+     * New posts on the courses' boards (announcements, Q&A) into Triage, once each: the model sums
+     * one up and suggests tasks from it, as for mail. Only posts from the last [ANNOUNCE_WITHIN] (not
+     * a board's whole history the first time).
+     */
+    private suspend fun announce(posts: List<Ref>) {
+        val since = Instant.now(clock).minus(ANNOUNCE_WITHIN)
+        for (p in posts.filter { (it.date ?: Instant.EPOCH) > since }) {
+            runCatching {
+                val body = postText(plms.client.page(PlmsLinks.toWeb(p.url, base)!!))
+                triage.submitOnce("plms", "${p.context} · ${p.title}", body.ifBlank { p.title }, p.url, p.context)
+            }.onFailure { log.warn("PLMS post {} not taken in: {}", p.url, it.toString()) }
+        }
     }
 
     /** The course page's activities: files, boards, assignments and the rest (labels are only text). */
@@ -155,6 +172,23 @@ class PlmsCatalog(
         private val POST_DATE = Regex("""<span title="(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})">""")
 
         /** Visible text of an HTML fragment. */
+        /** How far back a board's posts go into Triage. */
+        private val ANNOUNCE_WITHIN: java.time.Duration = java.time.Duration.ofDays(3)
+
+        /**
+         * A post page's text: Moodle's main region (role="main"), without its scripts, styles and
+         * tags, lines kept; at most a few thousand characters.
+         */
+        fun postText(html: String): String {
+            val main = html.substringAfter("role=\"main\"").substringAfter(">").substringBefore("<footer")
+            return main.replace(Regex("(?is)<(script|style)[^>]*>.*?</\\1>"), " ")
+                .replace(Regex("(?i)<br\\s*/?>|</p>|</div>|</li>|</h\\d>"), "\n")
+                .replace(Regex("<[^>]+>"), " ")
+                .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
+                .lines().map { it.replace(Regex("[ \\t]+"), " ").trim() }.filter { it.isNotEmpty() }
+                .joinToString("\n").take(6000)
+        }
+
         fun text(html: String) = html.replace(Regex("<[^>]+>"), " ")
             .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
             .replace(Regex("""\s+"""), " ").trim()

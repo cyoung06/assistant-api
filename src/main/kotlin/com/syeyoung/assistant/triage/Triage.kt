@@ -147,10 +147,14 @@ class TriageService(
     suspend fun submit(req: SubmitRequest): TriageInputResponse = input(insert(req, sender = null))
 
     /** A mail, once: false when it was already taken in (by its mid: link). */
-    suspend fun submitMail(title: String, text: String, link: String, sender: String): Boolean {
-        val known = db.sql("select 1 from triage_inputs where source = 'mail' and link = :link").bind("link", link).map { _ -> 1 }.awaitOneOrNull()
+    suspend fun submitMail(title: String, text: String, link: String, sender: String): Boolean =
+        submitOnce("mail", title.ifBlank { "(no subject)" }, text, link, sender)
+
+    /** Something from [source] (mail, a PLMS post), once: false when it was already taken in (by its [link]). */
+    suspend fun submitOnce(source: String, title: String, text: String, link: String, sender: String?): Boolean {
+        val known = db.sql("select 1 from triage_inputs where source = :source and link = :link").bind("source", source).bind("link", link).map { _ -> 1 }.awaitOneOrNull()
         if (known != null) return false
-        insert(SubmitRequest(source = "mail", text = text, title = title.ifBlank { "(no subject)" }, link = link), sender)
+        insert(SubmitRequest(source = source, text = text, title = title, link = link), sender)
         return true
     }
 
