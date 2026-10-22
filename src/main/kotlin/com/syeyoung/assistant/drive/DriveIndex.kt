@@ -91,12 +91,16 @@ class DriveIndex(private val dav: WebDav, private val db: DatabaseClient, privat
     }
 
     /** Notes saved by live editing since last looked: their links read again. */
-    private suspend fun notesSaved() = lock.withLock {
+    internal suspend fun notesSaved() = lock.withLock {
         val now = Instant.now(clock)
         val saved = db.sql("select path from sync_docs where updated_at > :since and lower(path) like '%.md'").bind("since", since)
             .map { r -> r.get("path", String::class.java)!! }.flow().toList()
         since = now
-        for (path in saved) readLinks(path)
+        for (path in saved) {
+            // A note made since the drive was last walked: known now (the next walk fills in the rest).
+            if (get(path) == null) put(DriveEntry(path, path.substringAfterLast('/'), false, 0, now, "text/markdown", null))
+            readLinks(path)
+        }
     }
 
     private suspend fun put(e: DriveEntry) {

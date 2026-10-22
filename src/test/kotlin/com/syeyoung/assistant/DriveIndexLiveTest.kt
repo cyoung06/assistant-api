@@ -79,6 +79,17 @@ class DriveIndexLiveTest {
     }
 
     @Test
+    fun `a note made and saved live since the walk counts at once`() = runBlocking {
+        index.walk(scratch)
+        val path = "${scratch}확률/Notes/new.md"
+        write(path, "See @HW3")
+        // As live editing saves it.
+        db.sql("insert into sync_docs (path, state, base_state, updated_at) values (:p, ''::bytea, ''::bytea, now()) on conflict (path) do update set updated_at = now()").bind("p", path).await()
+        index.notesSaved()
+        assertEquals(listOf(path), index.notesLinkingTo("mention:hw3").map { it.path })
+    }
+
+    @Test
     fun `a file's page in the app is the file`() {
         val url = AppLinks.file("https://a.example", "Projects/확률및통계/Course files/week 1.pdf")
         assertEquals("https://a.example/files/%ED%99%95%EB%A5%A0%EB%B0%8F%ED%86%B5%EA%B3%84/Course%20files/week%201.pdf", url)
