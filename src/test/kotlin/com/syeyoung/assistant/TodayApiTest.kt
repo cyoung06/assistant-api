@@ -3,9 +3,12 @@ package com.syeyoung.assistant
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import com.syeyoung.assistant.today.TodayService
 
 /** The day at a glance (the test clock: Sunday 2026-10-18, 10:00 in Seoul). */
 class TodayApiTest : ApiTestBase() {
+    @Autowired lateinit var today: TodayService
 
     @Test
     fun `the next class with its room, today's events, and what's due soon`() {
@@ -58,5 +61,20 @@ class TodayApiTest : ApiTestBase() {
         assertThat((next["event"] as Map<*, *>)["title"]).isEqualTo("컴퓨터시스템 개론")
         // The project it names in full, not one whose name only starts it.
         assertThat(next["projectName"]).isEqualTo("컴퓨터시스템 개론")
+    }
+
+    @Test
+    fun `a quick note goes to the class on now, from a quarter of an hour before it`() {
+        val course = post("/api/v1/projects", mapOf("name" to "확률및통계"))
+        post("/api/v1/events", mapOf("title" to "Lecture", "start" to "2026-10-18T10:10:00+09:00", "end" to "2026-10-18T11:00:00+09:00", "projectId" to course["id"]))
+        assertThat(runBlocking { today.currentProject() }?.name).isEqualTo("확률및통계")
+    }
+
+    @Test
+    fun `between classes there's none`() {
+        val course = post("/api/v1/projects", mapOf("name" to "확률및통계"))
+        post("/api/v1/events", mapOf("title" to "Lecture", "start" to "2026-10-18T10:30:00+09:00", "end" to "2026-10-18T11:00:00+09:00", "projectId" to course["id"]))
+        post("/api/v1/events", mapOf("title" to "Earlier", "start" to "2026-10-18T08:00:00+09:00", "end" to "2026-10-18T09:59:00+09:00", "projectId" to course["id"]))
+        assertThat(runBlocking { today.currentProject() }).isNull()
     }
 }

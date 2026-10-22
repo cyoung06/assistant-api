@@ -1133,6 +1133,18 @@
         "required" : [ "id", "name" ],
         "type" : "object"
       },
+      "QuickNote" : {
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          },
+          "project" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "path" ],
+        "type" : "object"
+      },
       "QuotaWindow" : {
         "properties" : {
           "name" : {
@@ -3579,6 +3591,33 @@
           }
         },
         "tags" : [ "public-controller" ]
+      }
+    },
+    "/api/v1/quick-note" : {
+      "post" : {
+        "operationId" : "quickNote",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "kind",
+          "required" : false,
+          "schema" : {
+            "default" : "note",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuickNote"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "today-controller" ]
       }
     },
     "/api/v1/refs" : {
